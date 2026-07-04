@@ -4,18 +4,32 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
     "api:build": "tsp compile .",
     "api:swagger": "npm run api:build && node scripts/swagger-ui.mjs"
   },
   "dependencies": {
+    "@mantine/core": "^8.3.8",
+    "@mantine/hooks": "^8.3.8",
     "@typespec/compiler": "^1.13.0",
     "@typespec/http": "^1.13.0",
     "@typespec/openapi": "^1.13.0",
     "@typespec/openapi3": "^1.13.0",
-    "@typespec/rest": "^0.83.0"
+    "@typespec/rest": "^0.83.0",
+    "lucide-react": "^0.561.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
   },
   "packageManager": "npm@11.18.0+sha512.4faecce0be70366d1c67b1012c4adc1246354a6cc45bf589f92003073b05518d547403df1475c542d67a4845e22b4fafcd7cac0af02c7a96cc6814f09eb003fb",
   "devDependencies": {
-    "swagger-ui-dist": "^5.32.8"
+    "@types/node": "^26.1.0",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "swagger-ui-dist": "^5.32.8",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0"
   }
 }
