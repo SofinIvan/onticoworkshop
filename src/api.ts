@@ -26,6 +26,20 @@ export type OnlineCallSettings = {
   updatedAt: string;
 };
 
+export type UpdateOnlineCallSettingsRequest = {
+  availabilityScheduleId?: string;
+  title?: string;
+  description?: string;
+  durationMinutes?: number;
+  timezone?: string;
+  isActive?: boolean;
+  minimumNoticeMinutes?: number;
+  slotIntervalMinutes?: number;
+  bufferBeforeMinutes?: number;
+  bufferAfterMinutes?: number;
+  meetingUrl?: string;
+};
+
 export type BookingInfo = {
   profile: BookingProfile;
   onlineCall: OnlineCallSettings;
@@ -35,6 +49,13 @@ export type TimeSlot = {
   start: string;
   end: string;
   timezone: string;
+};
+
+export type DateOverride = {
+  date: string;
+  isUnavailable: boolean;
+  startTime?: string;
+  endTime?: string;
 };
 
 export type Guest = {
@@ -79,14 +100,16 @@ export type AvailabilitySchedule = {
   name: string;
   timezone: string;
   rules: AvailabilityRule[];
-  dateOverrides: Array<{
-    date: string;
-    isUnavailable: boolean;
-    startTime?: string;
-    endTime?: string;
-  }>;
+  dateOverrides: DateOverride[];
   createdAt: string;
   updatedAt: string;
+};
+
+export type UpdateAvailabilityScheduleRequest = {
+  name?: string;
+  timezone?: string;
+  rules?: AvailabilityRule[];
+  dateOverrides?: DateOverride[];
 };
 
 export type CreateBookingRequest = {
@@ -283,5 +306,50 @@ export const api = {
     return request<{ items: AvailabilitySchedule[] }>(
       `/availability-schedule?userId=${encodeURIComponent(userId)}`,
     );
+  },
+
+  async updateOnlineCallSettings(
+    userId: string,
+    body: UpdateOnlineCallSettingsRequest,
+  ) {
+    if (!API_BASE_URL) {
+      return {
+        ...demoBookingInfo.onlineCall,
+        ...body,
+        userId,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    return request<OnlineCallSettings>(`/user/${encodeURIComponent(userId)}/online-call`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  },
+
+  async updateAvailabilitySchedule(
+    scheduleId: string,
+    body: UpdateAvailabilityScheduleRequest,
+  ) {
+    if (!API_BASE_URL) {
+      return {
+        ...demoSchedule,
+        ...body,
+        id: scheduleId,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    return request<AvailabilitySchedule>(`/availability-schedule/${encodeURIComponent(scheduleId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  },
+
+  async deleteAvailabilitySchedule(scheduleId: string) {
+    if (!API_BASE_URL) return;
+    return request<void>(`/availability-schedule/${encodeURIComponent(scheduleId)}`, {
+      method: "DELETE",
+    });
   },
 };

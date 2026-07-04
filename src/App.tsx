@@ -13,8 +13,11 @@ import {
   Loader,
   NavLink,
   Paper,
+  NumberInput,
   ScrollArea,
   SimpleGrid,
+  Switch,
+  Select,
   Stack,
   Table,
   Text,
@@ -30,9 +33,11 @@ import {
   Clock3,
   Copy,
   Link,
+  Plus,
   Settings2,
   RotateCcw,
   UserRound,
+  Trash2,
   Video,
   CalendarClock,
 } from "lucide-react";
@@ -40,8 +45,10 @@ import {
   api,
   type AvailabilitySchedule,
   type AvailabilityRule,
+  type DateOverride,
   type Booking,
   type BookingInfo,
+  type OnlineCallSettings,
   type TimeSlot,
 } from "./api";
 
@@ -140,9 +147,40 @@ function cloneSchedule(schedule: AvailabilitySchedule) {
   };
 }
 
+function cloneOnlineCall(onlineCall: OnlineCallSettings) {
+  return { ...onlineCall };
+}
+
+function normalizeOptionalText(value: string) {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function sortWeekdayRules(rules: AvailabilityRule[]) {
+  return [...rules].sort(
+    (left, right) => weekdayOrder.indexOf(left.weekday) - weekdayOrder.indexOf(right.weekday),
+  );
+}
+
+function createDefaultRule(weekday: AvailabilityRule["weekday"]): AvailabilityRule {
+  return {
+    weekday,
+    startTime: "09:00",
+    endTime: "17:00",
+  };
+}
+
+function createDefaultOverride(): DateOverride {
+  return {
+    date: toDateInputValue(addDays(new Date(), 1)),
+    isUnavailable: true,
+  };
+}
+
 function App() {
   const [view, setView] = useState<ViewMode>("booking");
   const [bookingInfo, setBookingInfo] = useState<BookingInfo | null>(null);
+  const [onlineCallDraft, setOnlineCallDraft] = useState<OnlineCallSettings | null>(null);
   const [slots, setSlots] = useState<TimeSlot[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [schedules, setSchedules] = useState<AvailabilitySchedule[]>([]);
@@ -151,12 +189,23 @@ function App() {
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
   const [guest, setGuest] = useState<GuestForm>({ name: "", email: "", notes: "" });
   const [isLoading, setIsLoading] = useState(true);
+  const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
+  const [isSavingAvailability, setIsSavingAvailability] = useState(false);
+  const [isDeletingSchedule, setIsDeletingSchedule] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmation, setConfirmation] = useState<Booking | null>(null);
 
   const dateOptions = useMemo(
     () => Array.from({ length: 7 }, (_, index) => toDateInputValue(addDays(new Date(), index + 1))),
     [],
+  );
+  const scheduleOptions = useMemo(
+    () =>
+      schedules.map((schedule) => ({
+        value: schedule.id,
+        label: schedule.name,
+      })),
+    [schedules],
   );
 
   useEffect(() => {
@@ -192,6 +241,10 @@ function App() {
     const activeSchedule = schedules[0];
     setAvailabilityDraft(activeSchedule ? cloneSchedule(activeSchedule) : null);
   }, [schedules]);
+
+  useEffect(() => {
+    setOnlineCallDraft(bookingInfo ? cloneOnlineCall(bookingInfo.onlineCall) : null);
+  }, [bookingInfo]);
 
   useEffect(() => {
     let isMounted = true;
@@ -231,6 +284,79 @@ function App() {
       setBookings((current) => [booking, ...current]);
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function saveWorkspace() {
+    if (!bookingInfo || !onlineCallDraft) return;
+    setIsSavingWorkspace(true);
+    try {
+      const updated = await api.updateOnlineCallSettings(bookingInfo.profile.id, {
+        availabilityScheduleId: onlineCallDraft.availabilityScheduleId,
+        title: onlineCallDraft.title.trim(),
+        description: normalizeOptionalText(onlineCallDraft.description ?? ""),
+        durationMinutes: onlineCallDraft.durationMinutes,
+        timezone: onlineCallDraft.timezone.trim(),
+        isActive: onlineCallDraft.isActive,
+        minimumNoticeMinutes: onlineCallDraft.minimumNoticeMinutes,
+        slotIntervalMinutes: onlineCallDraft.slotIntervalMinutes,
+        bufferBeforeMinutes: onlineCallDraft.bufferBeforeMinutes,
+        bufferAfterMinutes: onlineCallDraft.bufferAfterMinutes,
+        meetingUrl: normalizeOptionalText(onlineCallDraft.meetingUrl ?? ""),
+      });
+      setBookingInfo((current) => (current ? { ...current, onlineCall: updated } : current));
+      setOnlineCallDraft(cloneOnlineCall(updated));
+    } finally {
+      setIsSavingWorkspace(false);
+    }
+  }
+
+  async function saveAvailability() {
+    if (!availabilityDraft) return;
+    setIsSavingAvailability(true);
+    try {
+      const updated = await api.updateAvailabilitySchedule(availabilityDraft.id, {
+        name: availabilityDraft.name.trim(),
+        timezone: availabilityDraft.timezone.trim(),
+        rules: availabilityDraft.rules,
+        dateOverrides: availabilityDraft.dateOverrides.map((override) => ({
+          date: override.date,
+          isUnavailable: override.isUnavailable,
+          startTime: normalizeOptionalText(override.startTime ?? ""),
+          endTime: normalizeOptionalText(override.endTime ?? ""),
+        })),
+      });
+      setSchedules((current) => current.map((schedule) => (schedule.id === updated.id ? updated : schedule)));
+      setAvailabilityDraft(cloneSchedule(updated));
+    } finally {
+      setIsSavingAvailability(false);
+    }
+  }
+
+  async function deleteAvailability() {
+    if (!availabilityDraft) return;
+    if (schedules.length <= 1) return;
+
+    setIsDeletingSchedule(true);
+    try {
+      const deletedId = availabilityDraft.id;
+      await api.deleteAvailabilitySchedule(deletedId);
+      const remainingSchedules = schedules.filter((schedule) => schedule.id !== deletedId);
+      setSchedules(remainingSchedules);
+      setAvailabilityDraft(remainingSchedules[0] ? cloneSchedule(remainingSchedules[0]) : null);
+      setBookingInfo((current) =>
+        current && current.onlineCall.availabilityScheduleId === deletedId && remainingSchedules[0]
+          ? {
+              ...current,
+              onlineCall: {
+                ...current.onlineCall,
+                availabilityScheduleId: remainingSchedules[0].id,
+              },
+            }
+          : current,
+      );
+    } finally {
+      setIsDeletingSchedule(false);
     }
   }
 
@@ -327,26 +453,31 @@ function App() {
               onSubmit={submitBooking}
             />
           ) : view === "workspace" ? (
-            <WorkspaceView bookingInfo={bookingInfo} bookings={bookings} />
+            <WorkspaceView
+              bookingInfo={bookingInfo}
+              bookings={bookings}
+              scheduleOptions={scheduleOptions}
+              draft={onlineCallDraft}
+              isSaving={isSavingWorkspace}
+              onDraftChange={(nextDraft) => setOnlineCallDraft(nextDraft)}
+              onReset={() => {
+                setOnlineCallDraft(cloneOnlineCall(bookingInfo.onlineCall));
+              }}
+              onSave={saveWorkspace}
+            />
           ) : view === "availability" ? (
             <AvailabilityView
-              activeSchedule={availabilityDraft}
-              onRuleChange={(weekday, field, value) => {
-                setAvailabilityDraft((current) =>
-                  current
-                    ? {
-                        ...current,
-                        rules: current.rules.map((rule) =>
-                          rule.weekday === weekday ? { ...rule, [field]: value } : rule,
-                        ),
-                      }
-                    : current,
-                );
-              }}
+              draft={availabilityDraft}
+              isDeleting={isDeletingSchedule}
+              isSaving={isSavingAvailability}
+              canDelete={schedules.length > 1}
+              onDraftChange={(nextDraft) => setAvailabilityDraft(nextDraft)}
+              onDelete={deleteAvailability}
               onReset={() => {
                 const activeSchedule = schedules[0];
                 setAvailabilityDraft(activeSchedule ? cloneSchedule(activeSchedule) : null);
               }}
+              onSave={saveAvailability}
             />
           ) : null}
         </Container>
@@ -512,48 +643,193 @@ function BookingView({
 type WorkspaceViewProps = {
   bookingInfo: BookingInfo;
   bookings: Booking[];
+  scheduleOptions: Array<{ value: string; label: string }>;
+  draft: OnlineCallSettings | null;
+  isSaving: boolean;
+  onDraftChange: (draft: OnlineCallSettings) => void;
+  onReset: () => void;
+  onSave: () => void;
 };
 
-function WorkspaceView({ bookingInfo, bookings }: WorkspaceViewProps) {
+function WorkspaceView({
+  bookingInfo,
+  bookings,
+  scheduleOptions,
+  draft,
+  isSaving,
+  onDraftChange,
+  onReset,
+  onSave,
+}: WorkspaceViewProps) {
+  const settings = draft ?? bookingInfo.onlineCall;
   const bookingUrl = `${window.location.origin}/?username=${bookingInfo.profile.username}`;
+  const canSave = Boolean(settings.title.trim() && settings.timezone.trim());
 
   return (
     <Stack>
       <Card withBorder>
-        <Stack>
+        <Stack gap="lg">
           <Group justify="space-between" align="flex-start">
             <Box>
-              <Title order={2}>{bookingInfo.onlineCall.title}</Title>
+              <Title order={2}>{settings.title}</Title>
               <Text size="sm" c="dimmed">
-                {bookingInfo.onlineCall.description}
+                {settings.description}
               </Text>
             </Box>
-            <Badge color={bookingInfo.onlineCall.isActive ? "green" : "gray"} variant="light">
-              {bookingInfo.onlineCall.isActive ? "Active" : "Paused"}
+            <Badge color={settings.isActive ? "green" : "gray"} variant="light">
+              {settings.isActive ? "Active" : "Paused"}
             </Badge>
           </Group>
 
-          <SimpleGrid cols={{ base: 1, sm: 2 }}>
-            <Metric icon={<Clock3 size={16} />} label="Duration" value={`${bookingInfo.onlineCall.durationMinutes}m`} />
-            <Metric icon={<CalendarDays size={16} />} label="Notice" value={`${bookingInfo.onlineCall.minimumNoticeMinutes}m`} />
-            <Metric icon={<Settings2 size={16} />} label="Interval" value={`${bookingInfo.onlineCall.slotIntervalMinutes}m`} />
-            <Metric icon={<Video size={16} />} label="Buffer" value={`${bookingInfo.onlineCall.bufferBeforeMinutes}/${bookingInfo.onlineCall.bufferAfterMinutes}m`} />
+          <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg">
+            <Stack gap="md">
+              <TextInput
+                label="Title"
+                value={settings.title}
+                onChange={(event) => onDraftChange({ ...settings, title: event.currentTarget.value })}
+              />
+              <Textarea
+                label="Description"
+                minRows={3}
+                value={settings.description ?? ""}
+                onChange={(event) =>
+                  onDraftChange({ ...settings, description: event.currentTarget.value })
+                }
+              />
+              <TextInput
+                label="Meeting URL"
+                value={settings.meetingUrl ?? ""}
+                onChange={(event) =>
+                  onDraftChange({ ...settings, meetingUrl: event.currentTarget.value })
+                }
+              />
+              <TextInput
+                label="Timezone"
+                value={settings.timezone}
+                onChange={(event) => onDraftChange({ ...settings, timezone: event.currentTarget.value })}
+              />
+              <Select
+                label="Availability schedule"
+                data={scheduleOptions}
+                value={settings.availabilityScheduleId}
+                onChange={(value) =>
+                  value ? onDraftChange({ ...settings, availabilityScheduleId: value }) : undefined
+                }
+                searchable
+                nothingFoundMessage="No schedules"
+              />
+              <Switch
+                label="Active"
+                checked={settings.isActive}
+                onChange={(event) => onDraftChange({ ...settings, isActive: event.currentTarget.checked })}
+              />
+            </Stack>
+
+            <Stack gap="md">
+              <SimpleGrid cols={{ base: 1, sm: 2 }}>
+                <NumberInput
+                  label="Duration"
+                  min={5}
+                  step={5}
+                  value={settings.durationMinutes}
+                  onChange={(value) =>
+                    onDraftChange({
+                      ...settings,
+                      durationMinutes: typeof value === "number" ? value : settings.durationMinutes,
+                    })
+                  }
+                />
+                <NumberInput
+                  label="Minimum notice"
+                  min={0}
+                  step={15}
+                  value={settings.minimumNoticeMinutes}
+                  onChange={(value) =>
+                    onDraftChange({
+                      ...settings,
+                      minimumNoticeMinutes:
+                        typeof value === "number" ? value : settings.minimumNoticeMinutes,
+                    })
+                  }
+                />
+                <NumberInput
+                  label="Slot interval"
+                  min={5}
+                  step={5}
+                  value={settings.slotIntervalMinutes}
+                  onChange={(value) =>
+                    onDraftChange({
+                      ...settings,
+                      slotIntervalMinutes:
+                        typeof value === "number" ? value : settings.slotIntervalMinutes,
+                    })
+                  }
+                />
+                <NumberInput
+                  label="Buffer before"
+                  min={0}
+                  step={5}
+                  value={settings.bufferBeforeMinutes}
+                  onChange={(value) =>
+                    onDraftChange({
+                      ...settings,
+                      bufferBeforeMinutes:
+                        typeof value === "number" ? value : settings.bufferBeforeMinutes,
+                    })
+                  }
+                />
+                <NumberInput
+                  label="Buffer after"
+                  min={0}
+                  step={5}
+                  value={settings.bufferAfterMinutes}
+                  onChange={(value) =>
+                    onDraftChange({
+                      ...settings,
+                      bufferAfterMinutes:
+                        typeof value === "number" ? value : settings.bufferAfterMinutes,
+                    })
+                  }
+                />
+              </SimpleGrid>
+
+              <SimpleGrid cols={{ base: 1, sm: 2 }}>
+                <Metric icon={<Clock3 size={16} />} label="Duration" value={`${settings.durationMinutes}m`} />
+                <Metric icon={<CalendarDays size={16} />} label="Notice" value={`${settings.minimumNoticeMinutes}m`} />
+                <Metric icon={<Settings2 size={16} />} label="Interval" value={`${settings.slotIntervalMinutes}m`} />
+                <Metric icon={<Video size={16} />} label="Buffer" value={`${settings.bufferBeforeMinutes}/${settings.bufferAfterMinutes}m`} />
+              </SimpleGrid>
+
+              <Group justify="space-between" gap="sm" wrap="nowrap">
+                <Group gap="sm" wrap="nowrap">
+                  <ThemeIcon variant="light" color="gray">
+                    <Link size={16} />
+                  </ThemeIcon>
+                  <Text size="sm" truncate="end">
+                    {bookingUrl}
+                  </Text>
+                </Group>
+                <Tooltip label="Copy link">
+                  <ActionIcon variant="default" aria-label="Copy link">
+                    <Copy size={16} />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+            </Stack>
           </SimpleGrid>
 
-          <Group justify="space-between" gap="sm" wrap="nowrap">
-            <Group gap="sm" wrap="nowrap">
-              <ThemeIcon variant="light" color="gray">
-                <Link size={16} />
-              </ThemeIcon>
-              <Text size="sm" truncate="end">
-                {bookingUrl}
-              </Text>
+          <Group justify="space-between" align="center" wrap="nowrap">
+            <Text size="sm" c="dimmed">
+              Update settings through the online-call API.
+            </Text>
+            <Group>
+              <Button variant="default" onClick={onReset}>
+                Reset
+              </Button>
+              <Button color="dark" loading={isSaving} disabled={!canSave} onClick={onSave}>
+                Save changes
+              </Button>
             </Group>
-            <Tooltip label="Copy link">
-              <ActionIcon variant="default" aria-label="Copy link">
-                <Copy size={16} />
-              </ActionIcon>
-            </Tooltip>
           </Group>
         </Stack>
       </Card>
@@ -564,19 +840,98 @@ function WorkspaceView({ bookingInfo, bookings }: WorkspaceViewProps) {
 }
 
 type AvailabilityViewProps = {
-  activeSchedule?: AvailabilitySchedule | null;
-  onRuleChange: (
+  draft: AvailabilitySchedule | null;
+  isSaving: boolean;
+  isDeleting: boolean;
+  canDelete: boolean;
+  onDraftChange: (draft: AvailabilitySchedule) => void;
+  onDelete: () => void;
+  onReset: () => void;
+  onSave: () => void;
+};
+
+function AvailabilityView({
+  draft,
+  isSaving,
+  isDeleting,
+  canDelete,
+  onDraftChange,
+  onDelete,
+  onReset,
+  onSave,
+}: AvailabilityViewProps) {
+  const activeSchedule = draft;
+  const nextRuleWeekday = activeSchedule
+    ? weekdayOrder.find((weekday) => !activeSchedule.rules.some((rule) => rule.weekday === weekday))
+    : undefined;
+
+  function updateRule(
     weekday: AvailabilityRule["weekday"],
     field: "startTime" | "endTime",
     value: string,
-  ) => void;
-  onReset: () => void;
-};
+  ) {
+    if (!activeSchedule) return;
+    onDraftChange({
+      ...activeSchedule,
+      rules: activeSchedule.rules.map((rule) =>
+        rule.weekday === weekday ? { ...rule, [field]: value } : rule,
+      ),
+    });
+  }
 
-function AvailabilityView({ activeSchedule, onRuleChange, onReset }: AvailabilityViewProps) {
+  function addRule() {
+    if (!activeSchedule || !nextRuleWeekday) return;
+    onDraftChange({
+      ...activeSchedule,
+      rules: sortWeekdayRules([...activeSchedule.rules, createDefaultRule(nextRuleWeekday)]),
+    });
+  }
+
+  function removeRule(weekday: AvailabilityRule["weekday"]) {
+    if (!activeSchedule) return;
+    onDraftChange({
+      ...activeSchedule,
+      rules: activeSchedule.rules.filter((rule) => rule.weekday !== weekday),
+    });
+  }
+
+  function addOverride() {
+    if (!activeSchedule) return;
+    onDraftChange({
+      ...activeSchedule,
+      dateOverrides: [...activeSchedule.dateOverrides, createDefaultOverride()],
+    });
+  }
+
+  function updateOverride(index: number, patch: Partial<DateOverride>) {
+    if (!activeSchedule) return;
+    onDraftChange({
+      ...activeSchedule,
+      dateOverrides: activeSchedule.dateOverrides.map((override, currentIndex) =>
+        currentIndex === index ? { ...override, ...patch } : override,
+      ),
+    });
+  }
+
+  function removeOverride(index: number) {
+    if (!activeSchedule) return;
+    onDraftChange({
+      ...activeSchedule,
+      dateOverrides: activeSchedule.dateOverrides.filter((_, currentIndex) => currentIndex !== index),
+    });
+  }
+
+  if (!activeSchedule) {
+    return (
+      <Card withBorder>
+        <Text c="dimmed">No availability schedule is loaded.</Text>
+      </Card>
+    );
+  }
+
   return (
     <Card withBorder>
-      <Stack>
+      <Stack gap="lg">
         <Group justify="space-between" align="flex-start">
           <Box>
             <Title order={2}>Availability</Title>
@@ -584,38 +939,184 @@ function AvailabilityView({ activeSchedule, onRuleChange, onReset }: Availabilit
               {activeSchedule?.timezone}
             </Text>
           </Box>
-          <Button variant="default" leftSection={<RotateCcw size={16} />} onClick={onReset}>
-            Reset
-          </Button>
+          <Group>
+            <Button variant="default" leftSection={<RotateCcw size={16} />} onClick={onReset}>
+              Reset
+            </Button>
+            <Button color="dark" loading={isSaving} onClick={onSave}>
+              Save changes
+            </Button>
+          </Group>
         </Group>
 
-        <Stack gap="xs">
-          {weekdayOrder.map((weekday) => {
-            const rule = activeSchedule?.rules.find((entry) => entry.weekday === weekday);
+        <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg">
+          <Stack gap="md">
+            <TextInput
+              label="Schedule name"
+              value={activeSchedule.name}
+              onChange={(event) => onDraftChange({ ...activeSchedule, name: event.currentTarget.value })}
+            />
+            <TextInput
+              label="Timezone"
+              value={activeSchedule.timezone}
+              onChange={(event) =>
+                onDraftChange({ ...activeSchedule, timezone: event.currentTarget.value })
+              }
+            />
 
-            if (!rule) return null;
-
-            return (
-              <Group key={weekday} align="flex-end" wrap="nowrap">
-                <Text size="sm" w={110} tt="capitalize">
-                  {weekdayLabels[weekday]}
+            <Group justify="space-between" align="center">
+              <Box>
+                <Text fw={600}>Weekly rules</Text>
+                <Text size="xs" c="dimmed">
+                  Matches the API `rules` array.
                 </Text>
-                <TextInput
-                  label="Start"
-                  type="time"
-                  value={rule.startTime}
-                  onChange={(event) => onRuleChange(weekday, "startTime", event.currentTarget.value)}
-                />
-                <TextInput
-                  label="End"
-                  type="time"
-                  value={rule.endTime}
-                  onChange={(event) => onRuleChange(weekday, "endTime", event.currentTarget.value)}
-                />
-              </Group>
-            );
-          })}
-        </Stack>
+              </Box>
+              <Button
+                variant="light"
+                leftSection={<Plus size={16} />}
+                onClick={addRule}
+                disabled={!nextRuleWeekday}
+              >
+                Add rule
+              </Button>
+            </Group>
+
+            <Stack gap="xs">
+              {weekdayOrder.map((weekday) => {
+                const rule = activeSchedule.rules.find((entry) => entry.weekday === weekday);
+
+                if (!rule) return null;
+
+                return (
+                  <Paper key={weekday} withBorder p="sm">
+                    <Group align="flex-end" justify="space-between" wrap="nowrap">
+                      <Text size="sm" w={110} tt="capitalize">
+                        {weekdayLabels[weekday]}
+                      </Text>
+                      <TextInput
+                        label="Start"
+                        type="time"
+                        value={rule.startTime}
+                        onChange={(event) => updateRule(weekday, "startTime", event.currentTarget.value)}
+                      />
+                      <TextInput
+                        label="End"
+                        type="time"
+                        value={rule.endTime}
+                        onChange={(event) => updateRule(weekday, "endTime", event.currentTarget.value)}
+                      />
+                      <ActionIcon
+                        variant="default"
+                        aria-label={`Remove ${weekdayLabels[weekday]} rule`}
+                        onClick={() => removeRule(weekday)}
+                      >
+                        <Trash2 size={16} />
+                      </ActionIcon>
+                    </Group>
+                  </Paper>
+                );
+              })}
+            </Stack>
+          </Stack>
+
+          <Stack gap="md">
+            <Group justify="space-between" align="center">
+              <Box>
+                <Text fw={600}>Date overrides</Text>
+                <Text size="xs" c="dimmed">
+                  Matches the API `dateOverrides` array.
+                </Text>
+              </Box>
+              <Button variant="light" leftSection={<Plus size={16} />} onClick={addOverride}>
+                Add override
+              </Button>
+            </Group>
+
+            <Stack gap="xs">
+              {activeSchedule.dateOverrides.length ? (
+                activeSchedule.dateOverrides.map((override, index) => (
+                  <Paper key={`${override.date}-${index}`} withBorder p="sm">
+                    <Stack gap="sm">
+                      <Group align="flex-end" wrap="nowrap">
+                        <TextInput
+                          label="Date"
+                          type="date"
+                          value={override.date}
+                          onChange={(event) =>
+                            updateOverride(index, { date: event.currentTarget.value })
+                          }
+                        />
+                        <Switch
+                          label="Unavailable"
+                          checked={override.isUnavailable}
+                          onChange={(event) =>
+                            updateOverride(index, { isUnavailable: event.currentTarget.checked })
+                          }
+                        />
+                        <ActionIcon
+                          variant="default"
+                          aria-label="Remove override"
+                          onClick={() => removeOverride(index)}
+                        >
+                          <Trash2 size={16} />
+                        </ActionIcon>
+                      </Group>
+                      <SimpleGrid cols={{ base: 1, sm: 2 }}>
+                        <TextInput
+                          label="Start"
+                          type="time"
+                          value={override.startTime ?? ""}
+                          disabled={override.isUnavailable}
+                          onChange={(event) =>
+                            updateOverride(index, { startTime: event.currentTarget.value })
+                          }
+                        />
+                        <TextInput
+                          label="End"
+                          type="time"
+                          value={override.endTime ?? ""}
+                          disabled={override.isUnavailable}
+                          onChange={(event) =>
+                            updateOverride(index, { endTime: event.currentTarget.value })
+                          }
+                        />
+                      </SimpleGrid>
+                    </Stack>
+                  </Paper>
+                ))
+              ) : (
+                <Paper withBorder p="md">
+                  <Text size="sm" c="dimmed">
+                    No date overrides yet.
+                  </Text>
+                </Paper>
+              )}
+            </Stack>
+
+            <Group justify="space-between" align="center">
+              <Text size="sm" c="dimmed">
+                Update or remove the current schedule through the availability-schedule API.
+              </Text>
+              <Button
+                variant="light"
+                color="red"
+                leftSection={<Trash2 size={16} />}
+                disabled={!canDelete}
+                loading={isDeleting}
+                onClick={onDelete}
+              >
+                Delete schedule
+              </Button>
+            </Group>
+          </Stack>
+        </SimpleGrid>
+
+        <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
+          <Metric icon={<CalendarClock size={16} />} label="Rules" value={`${activeSchedule.rules.length}`} />
+          <Metric icon={<CalendarDays size={16} />} label="Overrides" value={`${activeSchedule.dateOverrides.length}`} />
+          <Metric icon={<Settings2 size={16} />} label="Name" value={activeSchedule.name} />
+          <Metric icon={<Clock3 size={16} />} label="Timezone" value={activeSchedule.timezone} />
+        </SimpleGrid>
       </Stack>
     </Card>
   );
