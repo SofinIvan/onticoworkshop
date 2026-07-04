@@ -2,10 +2,29 @@ OPENAPI_FILE := tsp-output/schema/openapi.yaml
 
 .DEFAULT_GOAL := help
 
-.PHONY: help api-build openapi api-swagger swagger api-file
+.PHONY: help dev build check backend-build backend-run frontend-dev api-build openapi api-swagger swagger api-file
 
-help: ## Показать список доступных make-комxанд.
+help: ## Показать список доступных make-команд.
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+dev: ## Запустить бэкенд и фронтенд одновременно (в фоне).
+	$(MAKE) backend-run
+	$(MAKE) frontend-dev
+
+build: ## Собрать фронтенд + бэкенд.
+	$(MAKE) backend-build
+	npm run build
+
+check: build ## Собрать и проверить (алиас для build).
+
+backend-build: ## Собрать JAR бэкенда.
+	cd backend && mvn clean package -q -DskipTests
+
+backend-run: ## Запустить бэкенд на http://localhost:8080.
+	cd backend && mvn spring-boot:run -q
+
+frontend-dev: ## Запустить Vite dev server на http://localhost:5173.
+	npm run dev
 
 api-build: ## Сгенерировать OpenAPI 3.1 из main.tsp в $(OPENAPI_FILE).
 	npm run api:build

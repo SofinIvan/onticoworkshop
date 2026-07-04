@@ -438,6 +438,7 @@ function App() {
               selectedDate={selectedDate}
               selectedSlot={selectedSlot}
               slots={slots}
+              bookings={bookings}
               guest={guest}
               confirmation={confirmation}
               isSubmitting={isSubmitting}
@@ -455,7 +456,6 @@ function App() {
           ) : view === "workspace" ? (
             <WorkspaceView
               bookingInfo={bookingInfo}
-              bookings={bookings}
               scheduleOptions={scheduleOptions}
               draft={onlineCallDraft}
               isSaving={isSavingWorkspace}
@@ -492,6 +492,7 @@ type BookingViewProps = {
   selectedDate: string;
   selectedSlot: TimeSlot | null;
   slots: TimeSlot[];
+  bookings: Booking[];
   guest: GuestForm;
   confirmation: Booking | null;
   isSubmitting: boolean;
@@ -507,6 +508,7 @@ function BookingView({
   selectedDate,
   selectedSlot,
   slots,
+  bookings,
   guest,
   confirmation,
   isSubmitting,
@@ -518,131 +520,134 @@ function BookingView({
   const canSubmit = Boolean(selectedSlot && guest.name && guest.email);
 
   return (
-    <Card withBorder>
-      <SimpleGrid cols={{ base: 1, md: 3 }} spacing={0}>
-        <Stack p="md">
-          <Group gap="sm">
-            <Avatar size={48} src={bookingInfo.profile.avatarUrl} radius="xl" color="dark">
-              {initials(bookingInfo.profile.displayName)}
-            </Avatar>
+    <Stack>
+      <Card withBorder>
+        <SimpleGrid cols={{ base: 1, md: 3 }} spacing={0}>
+          <Stack p="md">
+            <Group gap="sm">
+              <Avatar size={48} src={bookingInfo.profile.avatarUrl} radius="xl" color="dark">
+                {initials(bookingInfo.profile.displayName)}
+              </Avatar>
+              <Box>
+                <Text fw={650}>{bookingInfo.profile.displayName}</Text>
+                <Text size="sm" c="dimmed">
+                  {bookingInfo.profile.bio}
+                </Text>
+              </Box>
+            </Group>
+
+            <Divider />
+
+            <Stack gap="md">
+              <InfoRow icon={<Clock3 size={16} />} text={`${bookingInfo.onlineCall.durationMinutes} minutes`} />
+              <InfoRow icon={<Video size={16} />} text="Online meeting" />
+              <InfoRow icon={<UserRound size={16} />} text={guestTimezone} />
+            </Stack>
+          </Stack>
+
+          <Stack p="md">
             <Box>
-              <Text fw={650}>{bookingInfo.profile.displayName}</Text>
-              <Text size="sm" c="dimmed">
-                {bookingInfo.profile.bio}
+              <Title order={2}>Select a time</Title>
+              <Text c="dimmed" size="sm">
+                {selectedSlot ? formatLongDate(selectedSlot.start, guestTimezone) : formatDayLabel(selectedDate)}
               </Text>
             </Box>
-          </Group>
 
-          <Divider />
-
-          <Stack gap="md">
-            <InfoRow icon={<Clock3 size={16} />} text={`${bookingInfo.onlineCall.durationMinutes} minutes`} />
-            <InfoRow icon={<Video size={16} />} text="Online meeting" />
-            <InfoRow icon={<UserRound size={16} />} text={guestTimezone} />
-          </Stack>
-        </Stack>
-
-        <Stack p="md">
-          <Box>
-            <Title order={2}>Select a time</Title>
-            <Text c="dimmed" size="sm">
-              {selectedSlot ? formatLongDate(selectedSlot.start, guestTimezone) : formatDayLabel(selectedDate)}
-            </Text>
-          </Box>
-
-          <SimpleGrid cols={{ base: 2, sm: 4, md: 7 }} spacing="xs">
-            {dateOptions.map((dateValue) => (
-              <Button
-                key={dateValue}
-                variant={dateValue === selectedDate ? "filled" : "default"}
-                color="dark"
-                onClick={() => onDateChange(dateValue)}
-              >
-                {new Date(`${dateValue}T12:00:00`).getDate()}
-              </Button>
-            ))}
-          </SimpleGrid>
-
-          <ScrollArea h={330} offsetScrollbars>
-            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs">
-              {slots.map((slot) => (
+            <SimpleGrid cols={{ base: 2, sm: 4, md: 7 }} spacing="xs">
+              {dateOptions.map((dateValue) => (
                 <Button
-                  key={slot.start}
-                  variant={selectedSlot?.start === slot.start ? "filled" : "default"}
+                  key={dateValue}
+                  variant={dateValue === selectedDate ? "filled" : "default"}
                   color="dark"
-                  onClick={() => onSlotChange(slot)}
+                  onClick={() => onDateChange(dateValue)}
                 >
-                  {formatTime(slot.start, guestTimezone)}
+                  {new Date(`${dateValue}T12:00:00`).getDate()}
                 </Button>
               ))}
             </SimpleGrid>
-          </ScrollArea>
-        </Stack>
 
-        <Stack p="md">
-          <Box>
-            <Title order={2}>Your details</Title>
-            <Text c="dimmed" size="sm">
-              {selectedSlot
-                ? `${formatTime(selectedSlot.start)} - ${formatTime(selectedSlot.end)}`
-                : "Choose a slot"}
-            </Text>
-          </Box>
+            <ScrollArea h={330} offsetScrollbars>
+              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs">
+                {slots.map((slot) => (
+                  <Button
+                    key={slot.start}
+                    variant={selectedSlot?.start === slot.start ? "filled" : "default"}
+                    color="dark"
+                    onClick={() => onSlotChange(slot)}
+                  >
+                    {formatTime(slot.start, guestTimezone)}
+                  </Button>
+                ))}
+              </SimpleGrid>
+            </ScrollArea>
+          </Stack>
 
-          <TextInput
-            label="Name"
-            value={guest.name}
-            onChange={(event) => onGuestChange({ ...guest, name: event.currentTarget.value })}
-          />
-          <TextInput
-            label="Email"
-            type="email"
-            value={guest.email}
-            onChange={(event) => onGuestChange({ ...guest, email: event.currentTarget.value })}
-          />
-          <Textarea
-            label="Notes"
-            minRows={4}
-            value={guest.notes}
-            onChange={(event) => onGuestChange({ ...guest, notes: event.currentTarget.value })}
-          />
+          <Stack p="md">
+            <Box>
+              <Title order={2}>Your details</Title>
+              <Text c="dimmed" size="sm">
+                {selectedSlot
+                  ? `${formatTime(selectedSlot.start)} - ${formatTime(selectedSlot.end)}`
+                  : "Choose a slot"}
+              </Text>
+            </Box>
 
-          <Button
-            color="dark"
-            leftSection={confirmation ? <Check size={16} /> : <CalendarDays size={16} />}
-            loading={isSubmitting}
-            disabled={!canSubmit}
-            onClick={onSubmit}
-          >
-            {confirmation ? "Booked" : "Confirm"}
-          </Button>
+            <TextInput
+              label="Name"
+              value={guest.name}
+              onChange={(event) => onGuestChange({ ...guest, name: event.currentTarget.value })}
+            />
+            <TextInput
+              label="Email"
+              type="email"
+              value={guest.email}
+              onChange={(event) => onGuestChange({ ...guest, email: event.currentTarget.value })}
+            />
+            <Textarea
+              label="Notes"
+              minRows={4}
+              value={guest.notes}
+              onChange={(event) => onGuestChange({ ...guest, notes: event.currentTarget.value })}
+            />
 
-          {confirmation ? (
-            <Paper withBorder p="sm">
-              <Group gap="sm" wrap="nowrap">
-                <ThemeIcon color="green" variant="light">
-                  <Check size={16} />
-                </ThemeIcon>
-                <Box>
-                  <Text size="sm" fw={600}>
-                    {formatLongDate(confirmation.start)}
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    {formatTime(confirmation.start)} · {confirmation.guest.email}
-                  </Text>
-                </Box>
-              </Group>
-            </Paper>
-          ) : null}
-        </Stack>
-      </SimpleGrid>
-    </Card>
+            <Button
+              color="dark"
+              leftSection={confirmation ? <Check size={16} /> : <CalendarDays size={16} />}
+              loading={isSubmitting}
+              disabled={!canSubmit}
+              onClick={onSubmit}
+            >
+              {confirmation ? "Booked" : "Confirm"}
+            </Button>
+
+            {confirmation ? (
+              <Paper withBorder p="sm">
+                <Group gap="sm" wrap="nowrap">
+                  <ThemeIcon color="green" variant="light">
+                    <Check size={16} />
+                  </ThemeIcon>
+                  <Box>
+                    <Text size="sm" fw={600}>
+                      {formatLongDate(confirmation.start)}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      {formatTime(confirmation.start)} · {confirmation.guest.email}
+                    </Text>
+                  </Box>
+                </Group>
+              </Paper>
+            ) : null}
+          </Stack>
+        </SimpleGrid>
+      </Card>
+
+      <BookingsView bookings={bookings} />
+    </Stack>
   );
 }
 
 type WorkspaceViewProps = {
   bookingInfo: BookingInfo;
-  bookings: Booking[];
   scheduleOptions: Array<{ value: string; label: string }>;
   draft: OnlineCallSettings | null;
   isSaving: boolean;
@@ -653,7 +658,6 @@ type WorkspaceViewProps = {
 
 function WorkspaceView({
   bookingInfo,
-  bookings,
   scheduleOptions,
   draft,
   isSaving,
@@ -833,8 +837,6 @@ function WorkspaceView({
           </Group>
         </Stack>
       </Card>
-
-      <BookingsView bookings={bookings} />
     </Stack>
   );
 }
