@@ -170,7 +170,6 @@ public class BookingService {
     );
 
     booking.setStatus("rescheduled");
-    booking.setRescheduledFromBookingId(bookingId);
     booking.setUpdatedAt(now);
     bookingRepository.save(booking);
 
