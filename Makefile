@@ -40,7 +40,7 @@ swagger: api-swagger ## Алиас для api-swagger.
 api-file: ## Показать путь к сгенерированному OpenAPI-файлу.
 	@echo "$(OPENAPI_FILE)"
 
-docker-build: ## Собрать Docker-образы фронтенда и бэкенда.
+docker-build: backend-build ## Собрать Docker-образы фронтенда и бэкенда (JAR собирается локально).
 	docker compose build
 
 docker-up: ## Запустить контейнеры (фронтенд на :80, бэкенд на :8080).
