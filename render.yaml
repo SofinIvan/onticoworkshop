@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: onticoworkshop-api
+    runtime: java
+    rootDir: backend
+    buildCommand: mvn package -DskipTests -B
+    startCommand: java -jar target/onticoworkshop-backend-*.jar
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: SPRING_DATASOURCE_URL
+        value: jdbc:sqlite:/app/data/onticoworkshop.db
+    disk:
+      name: data
+      mountPath: /app/data
+      sizeGB: 1
+
+  - type: static
+    name: onticoworkshop
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false
