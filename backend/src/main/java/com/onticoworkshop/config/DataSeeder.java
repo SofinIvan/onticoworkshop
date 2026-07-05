@@ -7,6 +7,7 @@ import java.time.ZonedDateTime;
 import java.util.List;
 
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import com.onticoworkshop.model.Availability;
@@ -22,6 +23,7 @@ import com.onticoworkshop.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 
 @Component
+@Profile("!test")
 @RequiredArgsConstructor
 public class DataSeeder implements CommandLineRunner {
 
