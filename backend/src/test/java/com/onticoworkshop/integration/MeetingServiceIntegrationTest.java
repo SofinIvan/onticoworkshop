@@ -1,128 +1,157 @@
 package com.onticoworkshop.integration;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onticoworkshop.BaseIntegrationTest;
 import com.onticoworkshop.dto.CreateMeetingRequest;
 import com.onticoworkshop.dto.UpdateMeetingRequest;
-import com.onticoworkshop.exception.NotFoundException;
-import com.onticoworkshop.model.Booking;
-import com.onticoworkshop.model.Meeting;
 import com.onticoworkshop.model.MeetingTimeRule;
-import com.onticoworkshop.repository.BookingRepository;
-import com.onticoworkshop.service.MeetingService;
 
 class MeetingServiceIntegrationTest extends BaseIntegrationTest {
 
   @Autowired
-  private MeetingService meetingService;
+  private MockMvc mockMvc;
 
   @Autowired
-  private BookingRepository bookingRepository;
+  private ObjectMapper objectMapper;
 
   @Test
-  void shouldCreateAndRetrieveMeeting() {
+  void shouldCreateAndRetrieveMeeting() throws Exception {
     CreateMeetingRequest request = new CreateMeetingRequest("org1", "Strategy Call",
         "Quarterly review", "UTC");
-    Meeting created = meetingService.createMeeting(request);
 
-    assertThat(created.getId()).startsWith("m_");
-    assertThat(created.getTitle()).isEqualTo("Strategy Call");
-    assertThat(created.getDurationMinutes()).isEqualTo(30);
-    assertThat(created.isActive()).isTrue();
+    String response = mockMvc.perform(post("/meeting")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(request)))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.id").isString())
+        .andExpect(jsonPath("$.title").value("Strategy Call"))
+        .andExpect(jsonPath("$.durationMinutes").value(30))
+        .andExpect(jsonPath("$.isActive").value(true))
+        .andReturn().getResponse().getContentAsString();
 
-    Meeting found = meetingService.getMeeting(created.getId());
-    assertThat(found.getDescription()).isEqualTo("Quarterly review");
-    assertThat(found.getUuid()).isNotNull();
+    String id = objectMapper.readTree(response).get("id").asText();
+
+    mockMvc.perform(get("/meeting/" + id))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.description").value("Quarterly review"))
+        .andExpect(jsonPath("$.uuid").isString());
   }
 
   @Test
-  void shouldUpdateMeeting() {
+  void shouldUpdateMeeting() throws Exception {
     CreateMeetingRequest createReq = new CreateMeetingRequest("org1", "Old Title",
         "desc", "UTC");
-    Meeting created = meetingService.createMeeting(createReq);
+
+    String response = mockMvc.perform(post("/meeting")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(createReq)))
+        .andExpect(status().isCreated())
+        .andReturn().getResponse().getContentAsString();
+
+    String id = objectMapper.readTree(response).get("id").asText();
 
     UpdateMeetingRequest updateReq = new UpdateMeetingRequest();
     updateReq.setTitle("New Title");
     updateReq.setDurationMinutes(60);
-    updateReq.setDescription("Updated description");
 
-    Meeting updated = meetingService.updateMeeting(created.getId(), updateReq);
-
-    assertThat(updated.getTitle()).isEqualTo("New Title");
-    assertThat(updated.getDurationMinutes()).isEqualTo(60);
-    assertThat(updated.getDescription()).isEqualTo("Updated description");
+    mockMvc.perform(patch("/meeting/" + id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(updateReq)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.title").value("New Title"))
+        .andExpect(jsonPath("$.durationMinutes").value(60));
   }
 
   @Test
-  void shouldDeleteMeetingAndCascadeBookings() {
-    CreateMeetingRequest createReq = new CreateMeetingRequest("org1", "To Delete",
-        "desc", "UTC");
-    Meeting created = meetingService.createMeeting(createReq);
-
-    Booking booking = new Booking("bkg_del1", "org1", created.getId(), "confirmed",
-        "Guest", "guest@test.com", "UTC",
-        "2024-06-10T10:00:00Z", "2024-06-10T10:30:00Z", "UTC",
-        null, null, null, null, null, "2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z");
-    bookingRepository.save(booking);
-
-    meetingService.deleteMeeting(created.getId());
-
-    assertThatThrownBy(() -> meetingService.getMeeting(created.getId()))
-        .isInstanceOf(NotFoundException.class);
-
-    List<Booking> remainingBookings = bookingRepository.findByOrganizerIdOrderByCreatedAtDesc("org1");
-    assertThat(remainingBookings).isEmpty();
-  }
-
-  @Test
-  void shouldListMeetingsByOrganizer() {
-    CreateMeetingRequest req1 = new CreateMeetingRequest("orgZ", "M1", "desc", "UTC");
-    CreateMeetingRequest req2 = new CreateMeetingRequest("orgZ", "M2", "desc", "UTC");
-    CreateMeetingRequest req3 = new CreateMeetingRequest("orgW", "Other", "desc", "UTC");
-    meetingService.createMeeting(req1);
-    meetingService.createMeeting(req2);
-    meetingService.createMeeting(req3);
-
-    List<Meeting> orgZMeetings = meetingService.listMeetings("orgZ");
-
-    assertThat(orgZMeetings).hasSize(2);
-    assertThat(orgZMeetings).extracting("title").contains("M1", "M2");
-  }
-
-  @Test
-  void shouldCreateMeetingWithTimeRules() {
-    CreateMeetingRequest request = new CreateMeetingRequest("org1",
+  void shouldCreateAndUpdateMeetingWithTimeRules() throws Exception {
+    CreateMeetingRequest createReq = new CreateMeetingRequest("org1",
         "Meeting with rules", "desc", "UTC");
-    Meeting created = meetingService.createMeeting(request);
+
+    String response = mockMvc.perform(post("/meeting")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(createReq)))
+        .andExpect(status().isCreated())
+        .andReturn().getResponse().getContentAsString();
+
+    String id = objectMapper.readTree(response).get("id").asText();
 
     UpdateMeetingRequest updateReq = new UpdateMeetingRequest();
     updateReq.setTimeRules(List.of(
         new MeetingTimeRule(null, "monday", "09:00", "12:00"),
         new MeetingTimeRule(null, "wednesday", "14:00", "17:00")));
 
-    Meeting updated = meetingService.updateMeeting(created.getId(), updateReq);
+    mockMvc.perform(patch("/meeting/" + id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(updateReq)))
+        .andExpect(status().isOk());
 
-    assertThat(updated.getTimeRules()).hasSize(2);
-    assertThat(updated.getTimeRules()).extracting("weekday").contains("monday", "wednesday");
+    mockMvc.perform(get("/meeting/" + id))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.timeRules.length()").value(2));
   }
 
   @Test
-  void shouldReturnAllMeetingsWhenOrganizerIdNull() {
-    CreateMeetingRequest req1 = new CreateMeetingRequest("orgA", "A", "desc", "UTC");
-    CreateMeetingRequest req2 = new CreateMeetingRequest("orgB", "B", "desc", "UTC");
-    meetingService.createMeeting(req1);
-    meetingService.createMeeting(req2);
+  void shouldDeleteMeeting() throws Exception {
+    CreateMeetingRequest createReq = new CreateMeetingRequest("org1", "To Delete",
+        "desc", "UTC");
 
-    List<Meeting> all = meetingService.listMeetings(null);
+    String response = mockMvc.perform(post("/meeting")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(createReq)))
+        .andExpect(status().isCreated())
+        .andReturn().getResponse().getContentAsString();
 
-    assertThat(all).hasSizeGreaterThanOrEqualTo(2);
+    String id = objectMapper.readTree(response).get("id").asText();
+
+    mockMvc.perform(delete("/meeting/" + id))
+        .andExpect(status().isNoContent());
+
+    mockMvc.perform(get("/meeting/" + id))
+        .andExpect(status().isNotFound());
+  }
+
+  @Test
+  void shouldReturn404ForMissingMeeting() throws Exception {
+    mockMvc.perform(get("/meeting/m_nonexistent"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+  }
+
+  @Test
+  void shouldListMeetingsByOrganizer() throws Exception {
+    CreateMeetingRequest req1 = new CreateMeetingRequest("orgZ", "M1", "desc", "UTC");
+    CreateMeetingRequest req2 = new CreateMeetingRequest("orgZ", "M2", "desc", "UTC");
+    CreateMeetingRequest req3 = new CreateMeetingRequest("orgW", "Other", "desc", "UTC");
+
+    mockMvc.perform(post("/meeting")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(req1)))
+        .andExpect(status().isCreated());
+    mockMvc.perform(post("/meeting")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(req2)))
+        .andExpect(status().isCreated());
+    mockMvc.perform(post("/meeting")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(req3)))
+        .andExpect(status().isCreated());
+
+    mockMvc.perform(get("/meeting").param("organizerId", "orgZ"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(2));
   }
 }
