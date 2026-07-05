@@ -7,9 +7,38 @@ Mantine v8 UI, and a Spring Boot 3.5.14 + Java 17 + SQLite backend in `backend/`
 
 ## Agent rules
 
-**Do NOT commit or push without explicit user request and confirmation.**
-If a task is finished, report the result and wait. Only stage, commit, or push
-when the user explicitly asks for it (e.g. "commit", "push", "commit and push").
+### COMMIT AND PUSH — STRICTLY FORBIDDEN WITHOUT APPROVAL
+
+**NEVER run `git add`, `git commit`, `git commit -m`, or `git push` unless the user**
+**has explicitly and unambiguously asked for it.** This includes `git commit -m "..." && git push`
+in a single command, or any chained command that ends in a push.
+
+If the user says "fix this", "check this", "add this", "update this", "change this",
+"investigate", "diagnose", or any similar task description — **do the work, show the
+result, then STOP.** Do not commit. Do not push. Wait for an explicit instruction
+like "commit", "commit and push", "закоммить", "запушь", etc.
+
+**Even if the user says "go ahead" or "ok" or "do it" after your suggestion —**
+**that is NOT permission to commit.** You need a concrete word: commit, push, stage.
+
+Examples of what is NOT permission to commit:
+- "fix this" — do the fix, report, wait
+- "добавь в AGENTS.md" — make the edit, report, wait
+- "ok" / "do it" / "go ahead" — ambiguous, ask for clarification OR treat as permission
+  to edit files and run commands, NOT to commit/push
+- "looks good" — compliment, not permission
+- "yes" — ambiguous, may mean "yes that description is accurate", not "yes commit"
+
+Examples of what IS permission:
+- "commit"
+- "commit and push"
+- "закоммить и запушь"
+- "push"
+- "stage and commit"
+
+You will receive exactly ONE warning for violating this rule. On the second
+violation the session ends and the repo owner gets a summary of every unauthorized
+commit.
 
 ## Architecture
 
