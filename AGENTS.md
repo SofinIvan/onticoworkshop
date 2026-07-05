@@ -91,7 +91,11 @@ Architecture decisions are in `docs/adr/`.
 
 ## Commit style
 
-Recent commits use Conventional Commits (e.g. `feat: add calendar booking TypeSpec API`).
+**Always use Conventional Commits** with one of these prefixes: `feat`, `fix`, `docs`, `style`,
+`refactor`, `test`, `chore`, `ci`, `build`, `perf` (e.g. `feat: add calendar booking TypeSpec API`).
+**Each commit must be a single logical change.** Do not mix unrelated fixes, features,
+or refactors in one commit. If a change touches multiple concerns, split it into
+separate commits — one per concern.
 
 ## Keeping this file and Makefile in sync
 
