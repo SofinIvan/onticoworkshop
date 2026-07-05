@@ -5,6 +5,12 @@
 Small Vite + React 19 + TypeScript 5.9 single-page app with a TypeSpec API definition,
 Mantine v8 UI, and a Spring Boot 3.5.14 + Java 17 + SQLite backend in `backend/`.
 
+## Agent rules
+
+**Do NOT commit or push without explicit user request and confirmation.**
+If a task is finished, report the result and wait. Only stage, commit, or push
+when the user explicitly asks for it (e.g. "commit", "push", "commit and push").
+
 ## Architecture
 
 - **Frontend** (`src/`) — Vite SPA, no router, all state in `App.tsx`.
