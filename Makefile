@@ -7,9 +7,10 @@ OPENAPI_FILE := tsp-output/schema/openapi.yaml
 help: ## Показать список доступных make-команд.
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-dev: ## Запустить бэкенд и фронтенд одновременно (в фоне).
-	$(MAKE) backend-run
-	$(MAKE) frontend-dev
+dev: ## Запустить бэкенд (фон) + фронтенд. Ctrl+C остановит фронтенд, бэкенд — lsof -ti:8080 | xargs kill.
+	cd backend && mvn spring-boot:run -q &
+	sleep 2
+	npm run dev
 
 build: ## Собрать фронтенд + бэкенд.
 	$(MAKE) backend-build

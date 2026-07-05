@@ -10,6 +10,7 @@ Mantine v8 UI, and a Spring Boot 3.5.14 + Java 17 + SQLite backend in `backend/`
 - **Frontend** (`src/`) — Vite SPA, no router, all state in `App.tsx`.
 - **Backend** (`backend/`) — Spring Boot REST API, JPA + SQLite (auto-created `onticoworkshop.db`).
 - **API client** (`src/api.ts`) — base URL from `VITE_API_BASE_URL` env var. Falls back to hardcoded demo data when the env var is unset (the default dev mode).
+- **Public booking** — meetings have UUID-based public links (`/?meeting={uuid}`). Handled by `PublicBookingPage` component + `PublicController` backend. No auth required.
 
 ## Commands
 
@@ -39,14 +40,25 @@ cd backend && mvn clean package -s /path/to/central-settings.xml
 
 | Package | Purpose |
 |---|---|
-| `model/` | JPA entities (User, OnlineCallSettings, AvailabilitySchedule, Booking, etc.) |
+| `model/` | JPA entities (User, Meeting, MeetingTimeRule, Availability, AvailabilityRule, DateOverride, Booking) |
 | `repository/` | Spring Data JPA repositories |
-| `service/` | Business logic (slot generation, booking flow) |
-| `controller/` | REST endpoints matching the TypeSpec API |
+| `service/` | Business logic (slot generation, booking flow, duplicate check) |
+| `controller/` | REST endpoints matching the TypeSpec API + `PublicController` for UUID-based access |
 | `dto/` | Request/response shapes |
 | `config/` | CORS (allows `localhost:5173`) + seed data runner |
 
-Seed data (user "sofia", a schedule, a few bookings) is auto-inserted on first startup.
+Seed data (user "sofia", a meeting, an availability, two bookings) is auto-inserted on first startup.
+
+Domain glossary is in `CONTEXT.md` — read it before working with domain entities.
+Architecture decisions are in `docs/adr/`.
+
+## Key business rules
+
+- **Slot generation** — intersection of Availability × MeetingTimeRule, minus existing bookings, minus minimumNoticeMinutes.
+- **Duplicate prevention** — one guest can book a meeting only once (checked by meetingId + guestEmail, cancelled bookings excluded).
+- **Guest auto-creation** — when a guest books, a User record is auto-created by email if one doesn't exist.
+- **Cascade delete** — deleting a Meeting deletes all its Bookings.
+- **Delete confirmation** — all destructive operations require modal confirmation.
 
 ## TypeScript notes
 
@@ -76,3 +88,16 @@ When you add, remove, or change a developer workflow (a command, a build step, a
 a codegen step, a deploy target), update **both** `AGENTS.md` and `Makefile` at the same time.
 `AGENTS.md` is the agent's primary reference; `Makefile` is the executable shortcut for humans and CI.
 If they drift, an agent will guess wrong.
+
+## Documentation discipline
+
+Before committing, update all relevant documentation to reflect the changes:
+
+- **`CONTEXT.md`** — if you added, renamed, or changed the meaning of a domain entity or term
+- **`AGENTS.md`** — if commands, architecture, business rules, or file layout changed
+- **`README.md`** — if the tech stack, setup steps, env vars, or feature list changed
+- **`docs/adr/`** — if you made a hard-to-reverse, surprising, or trade-off-based architectural decision
+- **`Makefile`** — if a developer workflow command was added, removed, or changed
+
+If you don't, the next agent (or developer) will operate on stale information and make mistakes.
+
