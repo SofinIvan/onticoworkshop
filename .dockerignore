@@ -1,0 +1,9 @@
+node_modules
+dist
+*.db
+*.db-*
+.env
+.env.local
+tsp-output
+.github
+.git

@@ -2,7 +2,7 @@ OPENAPI_FILE := tsp-output/schema/openapi.yaml
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dev build check backend-build backend-run frontend-dev api-build openapi api-swagger swagger api-file
+.PHONY: help dev build check backend-build backend-run frontend-dev api-build openapi api-swagger swagger api-file docker-up docker-down docker-build
 
 help: ## Показать список доступных make-команд.
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -39,3 +39,12 @@ swagger: api-swagger ## Алиас для api-swagger.
 
 api-file: ## Показать путь к сгенерированному OpenAPI-файлу.
 	@echo "$(OPENAPI_FILE)"
+
+docker-build: ## Собрать Docker-образы фронтенда и бэкенда.
+	docker compose build
+
+docker-up: ## Запустить контейнеры (фронтенд на :80, бэкенд на :8080).
+	docker compose up -d
+
+docker-down: ## Остановить и удалить контейнеры.
+	docker compose down

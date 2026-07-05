@@ -24,8 +24,13 @@ Mantine v8 UI, and a Spring Boot 3.5.14 + Java 17 + SQLite backend in `backend/`
 | Frontend | `make api-swagger` or `npm run api:swagger` | API build + Swagger UI at `http://127.0.0.1:8080` |
 | Backend | `make backend-run` | Start backend at `http://localhost:8080` |
 | Backend | `make backend-build` | Build backend JAR |
+| Docker | `make docker-build` | Build frontend + backend Docker images |
+| Docker | `make docker-up` | Start containers (frontend :80, backend :8080) |
+| Docker | `make docker-down` | Stop and remove containers |
 
 To connect frontend → backend, set `VITE_API_BASE_URL=http://localhost:8080` in `.env`.
+
+In Docker, nginx serves the frontend and proxies `/api/*` to the backend, so `VITE_API_BASE_URL` is set to `/api` at build time.
 
 There is no test framework, linter, or formatter configured for the frontend.
 `npm run build` is the primary frontend validation step.
