@@ -47,6 +47,28 @@ commit.
 - **API client** (`src/api.ts`) — base URL from `VITE_API_BASE_URL` env var. Falls back to hardcoded demo data when the env var is unset (the default dev mode).
 - **Public booking** — meetings have UUID-based public links (`/?meeting={uuid}`). Handled by `PublicBookingPage` component + `PublicController` backend. No auth required.
 
+### Docker setup
+
+There are **two Dockerfiles** for different purposes:
+
+| File | Purpose |
+|---|---|
+| `Dockerfile` | **Production/Render** — multi-stage build: compiles Java backend (Maven) + React frontend (Vite), runs both in one container (Java in background + nginx proxying `/api/` → `localhost:8080`). Used by Render.com deployment. |
+| `Dockerfile.frontend-only` | **Local dev** — builds only the React frontend, serves via nginx. Used by `docker-compose.yml` (which runs backend as a separate container via `backend/Dockerfile`). |
+
+`nginx.conf` keeps `proxy_pass http://backend:8080/` for docker-compose use. The combined `Dockerfile` patches this to `http://127.0.0.1:8080/` at build time via `sed`.
+
+### Render.com deployment
+
+The app is deployed on Render.com as a single Docker web service:
+- **URL**: `https://onticoworkshop.onrender.com`
+- **Dashboard**: `https://dashboard.render.com/web/srv-d9574bgk1i2s739rroq0`
+- **Branch**: `develop` (auto-deploy on push)
+- **Plan**: free (spins down after 15 min of inactivity; cold start takes ~100s due to Spring Boot)
+- SQLite database is ephemeral (lost on redeploy); seed data auto-creates tables and demo content on startup
+
+`render.yaml` (Blueprint) defines a split two-service architecture (Java web service + static site) which is the intended production layout, but cannot be deployed via the Render MCP tool due to API limitations (no `rootDir` or disk mount support). The combined `Dockerfile` is the current workaround.
+
 ## Commands
 
 | Where | Command | What it does |
@@ -59,13 +81,13 @@ commit.
 | Frontend | `make api-swagger` or `npm run api:swagger` | API build + Swagger UI at `http://127.0.0.1:8080` |
 | Backend | `make backend-run` | Start backend at `http://localhost:8080` |
 | Backend | `make backend-build` | Build backend JAR |
-| Docker | `make docker-build` | Build frontend + backend Docker images |
-| Docker | `make docker-up` | Start containers (frontend :80, backend :8080) |
+| Docker | `make docker-build` | Build frontend + backend Docker images (uses `docker-compose.yml`, JAR built locally) |
+| Docker | `make docker-up` | Start containers (frontend :80, backend :8080) via docker-compose |
 | Docker | `make docker-down` | Stop and remove containers |
 
 To connect frontend → backend, set `VITE_API_BASE_URL=http://localhost:8080` in `.env`.
 
-In Docker, nginx serves the frontend and proxies `/api/*` to the backend, so `VITE_API_BASE_URL` is set to `/api` at build time.
+In Docker (both local docker-compose and Render), nginx serves the frontend and proxies `/api/*` to the backend, so `VITE_API_BASE_URL` is set to `/api` at build time.
 
 There is no test framework, linter, or formatter configured for the frontend.
 `npm run build` is the primary frontend validation step.

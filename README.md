@@ -41,6 +41,26 @@ make backend-run    # Бэкенд на http://localhost:8080
 make frontend-dev   # Фронтенд на http://localhost:5173
 ```
 
+## Docker (локальная разработка)
+
+```bash
+make docker-build   # Сборка образов (JAR бэкенда собирается локально)
+make docker-up      # Запуск: фронтенд на :80, бэкенд на :8080
+make docker-down    # Остановить и удалить контейнеры
+```
+
+`docker-compose.yml` использует раздельные контейнеры: бэкенд (`backend/Dockerfile`) + фронтенд (`Dockerfile.frontend-only`).
+
+## Деплой
+
+Приложение задеплоено на Render.com:
+- **URL**: https://onticoworkshop.onrender.com
+- Автодеплой из ветки `develop` при push
+- Бесплатный тариф: сервис засыпает через 15 мин бездействия, холодный старт ~100 сек
+- SQLite база эфемерная (сбрасывается при редеплое), seed-данные автосоздаются
+
+Production Dockerfile (`Dockerfile`) — multi-stage: собирает Java-бэкенд и React-фронтенд, запускает оба в одном контейнере (nginx + Java).
+
 ## Структура проекта
 
 ```
