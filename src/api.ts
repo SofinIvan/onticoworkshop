@@ -9,9 +9,16 @@ export type BookingProfile = {
   avatarUrl?: string;
 };
 
-export type OnlineCallSettings = {
-  userId: string;
-  availabilityScheduleId: string;
+export type MeetingTimeRule = {
+  weekday: "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday";
+  startTime: string;
+  endTime: string;
+};
+
+export type Meeting = {
+  id: string;
+  organizerId: string;
+  uuid: string;
   title: string;
   description?: string;
   durationMinutes: number;
@@ -22,12 +29,12 @@ export type OnlineCallSettings = {
   bufferBeforeMinutes: number;
   bufferAfterMinutes: number;
   meetingUrl?: string;
+  timeRules: MeetingTimeRule[];
   createdAt: string;
   updatedAt: string;
 };
 
-export type UpdateOnlineCallSettingsRequest = {
-  availabilityScheduleId?: string;
+export type UpdateMeetingRequest = {
   title?: string;
   description?: string;
   durationMinutes?: number;
@@ -38,11 +45,12 @@ export type UpdateOnlineCallSettingsRequest = {
   bufferBeforeMinutes?: number;
   bufferAfterMinutes?: number;
   meetingUrl?: string;
+  timeRules?: MeetingTimeRule[];
 };
 
 export type BookingInfo = {
   profile: BookingProfile;
-  onlineCall: OnlineCallSettings;
+  meetings: Meeting[];
 };
 
 export type TimeSlot = {
@@ -66,7 +74,8 @@ export type Guest = {
 
 export type Booking = {
   id: string;
-  userId: string;
+  organizerId: string;
+  meetingId: string;
   status: BookingStatus;
   guest: Guest;
   start: string;
@@ -94,9 +103,9 @@ export type AvailabilityRule = {
   endTime: string;
 };
 
-export type AvailabilitySchedule = {
+export type Availability = {
   id: string;
-  userId: string;
+  organizerId: string;
   name: string;
   timezone: string;
   rules: AvailabilityRule[];
@@ -105,7 +114,7 @@ export type AvailabilitySchedule = {
   updatedAt: string;
 };
 
-export type UpdateAvailabilityScheduleRequest = {
+export type UpdateAvailabilityRequest = {
   name?: string;
   timezone?: string;
   rules?: AvailabilityRule[];
@@ -114,6 +123,8 @@ export type UpdateAvailabilityScheduleRequest = {
 
 export type CreateBookingRequest = {
   username: string;
+  meetingId?: string;
+  meetingUuid?: string;
   guestName: string;
   guestEmail: string;
   guestTimezone: string;
@@ -139,6 +150,25 @@ function atUtcHour(date: Date, hour: number, minute = 0) {
   return next;
 }
 
+export const demoMeeting: Meeting = {
+  id: "m_01",
+  organizerId: "usr_01",
+  title: "Intro call",
+  uuid: "550e8400-e29b-41d4-a716-446655440000",
+  description: "A focused 30 minute call to define scope and next steps.",
+  durationMinutes: 30,
+  timezone: "Europe/Moscow",
+  isActive: true,
+  minimumNoticeMinutes: 120,
+  slotIntervalMinutes: 30,
+  bufferBeforeMinutes: 10,
+  bufferAfterMinutes: 10,
+  meetingUrl: "https://meet.example.com/sofia",
+  timeRules: [],
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
 export const demoBookingInfo: BookingInfo = {
   profile: {
     id: "usr_01",
@@ -147,27 +177,12 @@ export const demoBookingInfo: BookingInfo = {
     timezone: "Europe/Moscow",
     bio: "Product strategy, calendar audits, and calm execution planning.",
   },
-  onlineCall: {
-    userId: "usr_01",
-    availabilityScheduleId: "sch_01",
-    title: "Intro call",
-    description: "A focused 30 minute call to define scope and next steps.",
-    durationMinutes: 30,
-    timezone: "Europe/Moscow",
-    isActive: true,
-    minimumNoticeMinutes: 120,
-    slotIntervalMinutes: 30,
-    bufferBeforeMinutes: 10,
-    bufferAfterMinutes: 10,
-    meetingUrl: "https://meet.example.com/sofia",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
+  meetings: [demoMeeting],
 };
 
-export const demoSchedule: AvailabilitySchedule = {
-  id: "sch_01",
-  userId: "usr_01",
+export const demoAvailability: Availability = {
+  id: "av_01",
+  organizerId: "usr_01",
   name: "Default working hours",
   timezone: "Europe/Moscow",
   rules: [
@@ -185,7 +200,8 @@ export const demoSchedule: AvailabilitySchedule = {
 export const demoBookings: Booking[] = [
   {
     id: "bkg_1024",
-    userId: "usr_01",
+    organizerId: "usr_01",
+    meetingId: "m_01",
     status: "confirmed",
     guest: {
       name: "Maya Chen",
@@ -202,7 +218,8 @@ export const demoBookings: Booking[] = [
   },
   {
     id: "bkg_1025",
-    userId: "usr_01",
+    organizerId: "usr_01",
+    meetingId: "m_01",
     status: "confirmed",
     guest: {
       name: "Ivan Petrov",
@@ -260,10 +277,11 @@ export const api = {
     return request<BookingInfo>(`/booking/new?username=${encodeURIComponent(username)}`);
   },
 
-  async listSlots(username: string, selectedDate: string, timezone: string) {
+  async listSlots(username: string, meetingId: string, selectedDate: string, timezone: string) {
     if (!API_BASE_URL) return { items: getDemoSlots(selectedDate, timezone) };
     const params = new URLSearchParams({
       username,
+      meetingId,
       startDate: selectedDate,
       endDate: selectedDate,
       timezone,
@@ -276,6 +294,7 @@ export const api = {
       return {
         ...demoBookings[0],
         id: `bkg_${Date.now()}`,
+        meetingId: body.meetingId ?? demoBookings[0].meetingId,
         guest: {
           name: body.guestName,
           email: body.guestEmail,
@@ -296,60 +315,89 @@ export const api = {
     });
   },
 
-  async listBookings(userId: string) {
+  async listBookings(organizerId: string) {
     if (!API_BASE_URL) return { items: demoBookings };
-    return request<{ items: Booking[] }>(`/booking?userId=${encodeURIComponent(userId)}`);
+    return request<{ items: Booking[] }>(`/booking?organizerId=${encodeURIComponent(organizerId)}`);
   },
 
-  async listAvailabilitySchedules(userId: string) {
-    if (!API_BASE_URL) return { items: [demoSchedule] };
-    return request<{ items: AvailabilitySchedule[] }>(
-      `/availability-schedule?userId=${encodeURIComponent(userId)}`,
+  async listAvailabilities(organizerId: string) {
+    if (!API_BASE_URL) return { items: [demoAvailability] };
+    return request<{ items: Availability[] }>(
+      `/availability?organizerId=${encodeURIComponent(organizerId)}`,
     );
   },
 
-  async updateOnlineCallSettings(
-    userId: string,
-    body: UpdateOnlineCallSettingsRequest,
+  async updateMeeting(
+    meetingId: string,
+    body: UpdateMeetingRequest,
   ) {
     if (!API_BASE_URL) {
-      return {
-        ...demoBookingInfo.onlineCall,
-        ...body,
-        userId,
-        updatedAt: new Date().toISOString(),
-      };
+      return { ...demoMeeting, ...body, id: meetingId, updatedAt: new Date().toISOString() };
     }
 
-    return request<OnlineCallSettings>(`/user/${encodeURIComponent(userId)}/online-call`, {
+    return request<Meeting>(`/meeting/${encodeURIComponent(meetingId)}`, {
       method: "PATCH",
       body: JSON.stringify(body),
     });
   },
 
-  async updateAvailabilitySchedule(
-    scheduleId: string,
-    body: UpdateAvailabilityScheduleRequest,
+  async updateAvailability(
+    availabilityId: string,
+    body: UpdateAvailabilityRequest,
   ) {
     if (!API_BASE_URL) {
-      return {
-        ...demoSchedule,
-        ...body,
-        id: scheduleId,
-        updatedAt: new Date().toISOString(),
-      };
+      return { ...demoAvailability, ...body, id: availabilityId, updatedAt: new Date().toISOString() };
     }
 
-    return request<AvailabilitySchedule>(`/availability-schedule/${encodeURIComponent(scheduleId)}`, {
+    return request<Availability>(`/availability/${encodeURIComponent(availabilityId)}`, {
       method: "PATCH",
       body: JSON.stringify(body),
     });
   },
 
-  async deleteAvailabilitySchedule(scheduleId: string) {
+  async deleteAvailability(availabilityId: string) {
     if (!API_BASE_URL) return;
-    return request<void>(`/availability-schedule/${encodeURIComponent(scheduleId)}`, {
+    return request<void>(`/availability/${encodeURIComponent(availabilityId)}`, {
       method: "DELETE",
     });
+  },
+
+  async listMeetings(organizerId: string) {
+    if (!API_BASE_URL) return { items: [demoMeeting] };
+    return request<{ items: Meeting[] }>(
+      `/meeting?organizerId=${encodeURIComponent(organizerId)}`,
+    );
+  },
+
+  async createMeeting(organizerId: string, title: string, timezone: string) {
+    if (!API_BASE_URL) {
+      return { ...demoMeeting, id: `m_${Date.now()}` };
+    }
+    return request<Meeting>("/meeting", {
+      method: "POST",
+      body: JSON.stringify({ organizerId, title, timezone }),
+    });
+  },
+
+  async deleteMeeting(meetingId: string) {
+    if (!API_BASE_URL) return;
+    return request<void>(`/meeting/${encodeURIComponent(meetingId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  async getPublicMeeting(uuid: string) {
+    if (!API_BASE_URL) {
+      return { profile: demoBookingInfo.profile, meeting: demoMeeting };
+    }
+    return request<{ profile: BookingProfile; meeting: Meeting }>(
+      `/public/meeting?uuid=${encodeURIComponent(uuid)}`,
+    );
+  },
+
+  async listPublicSlots(uuid: string, startDate: string, endDate: string, timezone: string) {
+    if (!API_BASE_URL) return { items: getDemoSlots(startDate, timezone) };
+    const params = new URLSearchParams({ uuid, startDate, endDate, timezone });
+    return request<{ items: TimeSlot[] }>(`/public/slots?${params.toString()}`);
   },
 };

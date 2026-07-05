@@ -13,9 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.onticoworkshop.dto.CreateUserRequest;
-import com.onticoworkshop.dto.UpdateOnlineCallSettingsRequest;
 import com.onticoworkshop.dto.UpdateUserRequest;
-import com.onticoworkshop.model.OnlineCallSettings;
 import com.onticoworkshop.model.User;
 import com.onticoworkshop.service.UserService;
 
@@ -49,17 +47,5 @@ public class UserController {
       @PathVariable String userId,
       @Valid @RequestBody UpdateUserRequest request) {
     return ResponseEntity.ok(userService.updateUser(userId, request));
-  }
-
-  @GetMapping("/{userId}/online-call")
-  public ResponseEntity<OnlineCallSettings> getOnlineCallSettings(@PathVariable String userId) {
-    return ResponseEntity.ok(userService.getOnlineCallSettings(userId));
-  }
-
-  @PatchMapping("/{userId}/online-call")
-  public ResponseEntity<OnlineCallSettings> updateOnlineCallSettings(
-      @PathVariable String userId,
-      @Valid @RequestBody UpdateOnlineCallSettingsRequest request) {
-    return ResponseEntity.ok(userService.updateOnlineCallSettings(userId, request));
   }
 }

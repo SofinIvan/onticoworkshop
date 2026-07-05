@@ -1,6 +1,6 @@
 package com.onticoworkshop.service;
 
-import java.time.DayOfWeek;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -21,13 +21,15 @@ import com.onticoworkshop.dto.CreateBookingRequest;
 import com.onticoworkshop.dto.RescheduleBookingRequest;
 import com.onticoworkshop.exception.ConflictException;
 import com.onticoworkshop.exception.NotFoundException;
+import com.onticoworkshop.model.Availability;
 import com.onticoworkshop.model.AvailabilityRule;
-import com.onticoworkshop.model.AvailabilitySchedule;
 import com.onticoworkshop.model.Booking;
 import com.onticoworkshop.model.DateOverride;
-import com.onticoworkshop.model.OnlineCallSettings;
+import com.onticoworkshop.model.Meeting;
+import com.onticoworkshop.model.MeetingTimeRule;
 import com.onticoworkshop.model.User;
 import com.onticoworkshop.repository.BookingRepository;
+import com.onticoworkshop.repository.UserRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -36,22 +38,24 @@ import lombok.RequiredArgsConstructor;
 public class BookingService {
 
   private final UserService userService;
-  private final AvailabilityScheduleService scheduleService;
+  private final MeetingService meetingService;
+  private final AvailabilityService availabilityService;
   private final BookingRepository bookingRepository;
+  private final UserRepository userRepository;
 
-  public record BookingInfo(User profile, OnlineCallSettings onlineCall) {}
+  public record BookingInfo(User profile, List<Meeting> meetings) {}
 
   public BookingInfo getBookingInfo(String username) {
     User user = userService.getUserByUsername(username);
-    OnlineCallSettings settings = userService.getOnlineCallSettings(user.getId());
-    return new BookingInfo(user, settings);
+    List<Meeting> meetings = meetingService.listMeetings(user.getId());
+    return new BookingInfo(user, meetings);
   }
 
-  public List<Booking> listBookings(String userId, String status) {
+  public List<Booking> listBookings(String organizerId, String status) {
     if (status != null && !status.isBlank()) {
-      return bookingRepository.findByUserIdAndStatusOrderByCreatedAtDesc(userId, status);
+      return bookingRepository.findByOrganizerIdAndStatusOrderByCreatedAtDesc(organizerId, status);
     }
-    return bookingRepository.findByUserIdOrderByCreatedAtDesc(userId);
+    return bookingRepository.findByOrganizerIdOrderByCreatedAtDesc(organizerId);
   }
 
   public Booking getBooking(String bookingId) {
@@ -62,15 +66,45 @@ public class BookingService {
   @Transactional
   public Booking createBooking(CreateBookingRequest request) {
     User user = userService.getUserByUsername(request.getUsername());
-    OnlineCallSettings settings = userService.getOnlineCallSettings(user.getId());
+
+    String meetingId = request.getMeetingId();
+    if (meetingId == null || meetingId.isBlank()) {
+      Meeting meeting = meetingService.getMeetingByUuid(request.getMeetingUuid());
+      meetingId = meeting.getId();
+    }
+
+    Meeting meeting = meetingService.getMeeting(meetingId);
+
+    List<Booking> existing = bookingRepository.findByMeetingIdAndGuestEmailAndStatusNot(
+        meeting.getId(), request.getGuestEmail(), "cancelled");
+    if (!existing.isEmpty()) {
+      throw new ConflictException("You are already registered for this meeting");
+    }
+
+    userRepository.findByEmail(request.getGuestEmail()).orElseGet(() -> {
+      String now = Instant.now().toString();
+      User guestUser = new User(
+          "usr_" + UUID.randomUUID().toString().substring(0, 8),
+          request.getGuestEmail().replace("@", "_").replaceAll("[^a-zA-Z0-9_]", ""),
+          request.getGuestName(),
+          request.getGuestEmail(),
+          request.getGuestTimezone(),
+          null,
+          null,
+          now,
+          now
+      );
+      return userRepository.save(guestUser);
+    });
 
     ZonedDateTime start = ZonedDateTime.parse(request.getStart(), DateTimeFormatter.ISO_DATE_TIME);
-    ZonedDateTime end = start.plusMinutes(settings.getDurationMinutes());
+    ZonedDateTime end = start.plusMinutes(meeting.getDurationMinutes());
 
     String now = Instant.now().toString();
     Booking booking = new Booking(
         "bkg_" + UUID.randomUUID().toString().substring(0, 8),
         user.getId(),
+        meeting.getId(),
         "confirmed",
         request.getGuestName(),
         request.getGuestEmail(),
@@ -78,7 +112,7 @@ public class BookingService {
         start.toInstant().toString(),
         end.toInstant().toString(),
         request.getGuestTimezone(),
-        settings.getMeetingUrl(),
+        meeting.getMeetingUrl(),
         request.getNotes(),
         null,
         null,
@@ -110,14 +144,15 @@ public class BookingService {
     }
 
     String now = Instant.now().toString();
-    OnlineCallSettings settings = userService.getOnlineCallSettings(booking.getUserId());
+    Meeting meeting = meetingService.getMeeting(booking.getMeetingId());
     ZonedDateTime start = ZonedDateTime.parse(request.getStart(), DateTimeFormatter.ISO_DATE_TIME);
-    ZonedDateTime end = start.plusMinutes(settings.getDurationMinutes());
+    ZonedDateTime end = start.plusMinutes(meeting.getDurationMinutes());
 
     String newBookingId = "bkg_" + UUID.randomUUID().toString().substring(0, 8);
     Booking rescheduled = new Booking(
         newBookingId,
-        booking.getUserId(),
+        booking.getOrganizerId(),
+        booking.getMeetingId(),
         "confirmed",
         booking.getGuestName(),
         booking.getGuestEmail(),
@@ -142,21 +177,21 @@ public class BookingService {
     return bookingRepository.save(rescheduled);
   }
 
-  public List<TimeSlot> listSlots(String username, String startDate, String endDate, String timezone) {
+  public List<TimeSlot> listSlots(String username, String meetingId, String startDate, String endDate, String timezone) {
     User user = userService.getUserByUsername(username);
-    OnlineCallSettings settings = userService.getOnlineCallSettings(user.getId());
-    List<AvailabilitySchedule> schedules = scheduleService.listSchedules(user.getId());
+    Meeting meeting = meetingService.getMeeting(meetingId);
+    List<Availability> availabilities = availabilityService.listAvailabilities(user.getId());
 
-    if (schedules.isEmpty()) {
+    if (availabilities.isEmpty()) {
       return List.of();
     }
 
-    AvailabilitySchedule activeSchedule = schedules.get(0);
+    Availability availability = availabilities.get(0);
     ZoneId zoneId = ZoneId.of(timezone);
     LocalDate start = LocalDate.parse(startDate);
     LocalDate end = LocalDate.parse(endDate);
 
-    List<Booking> existingBookings = bookingRepository.findByUserIdAndStartBetweenOrderByStartAsc(
+    List<Booking> existingBookings = bookingRepository.findByOrganizerIdAndStartBetweenOrderByStartAsc(
         user.getId(), start.atStartOfDay(zoneId).toInstant().toString(),
         end.plusDays(1).atStartOfDay(zoneId).toInstant().toString());
 
@@ -164,18 +199,21 @@ public class BookingService {
     LocalDate current = start;
     while (!current.isAfter(end)) {
       slots.addAll(generateSlotsForDay(
-          current, activeSchedule, settings, zoneId, existingBookings));
+          current, availability, meeting, zoneId, existingBookings));
       current = current.plusDays(1);
     }
 
     return slots;
   }
 
-  private List<TimeSlot> generateSlotsForDay(LocalDate date, AvailabilitySchedule schedule,
-      OnlineCallSettings settings, ZoneId zoneId, List<Booking> existingBookings) {
+  private List<TimeSlot> generateSlotsForDay(LocalDate date, Availability availability,
+      Meeting meeting, ZoneId zoneId, List<Booking> existingBookings) {
     String dayOfWeek = date.getDayOfWeek().getDisplayName(TextStyle.FULL, Locale.ENGLISH).toLowerCase();
 
-    List<DateOverride> overrides = schedule.getDateOverrides().stream()
+    String windowStart = null;
+    String windowEnd = null;
+
+    List<DateOverride> overrides = availability.getDateOverrides().stream()
         .filter(o -> o.getDate().equals(date.toString()))
         .toList();
 
@@ -185,38 +223,63 @@ public class BookingService {
         return List.of();
       }
       if (override.getStartTime() != null && override.getEndTime() != null) {
-        return generateSlots(date, override.getStartTime(), override.getEndTime(),
-            settings, zoneId, existingBookings);
+        windowStart = override.getStartTime();
+        windowEnd = override.getEndTime();
       }
     }
 
-    AvailabilityRule rule = schedule.getRules().stream()
-        .filter(r -> r.getWeekday().equals(dayOfWeek))
-        .findFirst()
-        .orElse(null);
-
-    if (rule == null) {
-      return List.of();
+    if (windowStart == null) {
+      AvailabilityRule rule = availability.getRules().stream()
+          .filter(r -> r.getWeekday().equals(dayOfWeek))
+          .findFirst()
+          .orElse(null);
+      if (rule == null) {
+        return List.of();
+      }
+      windowStart = rule.getStartTime();
+      windowEnd = rule.getEndTime();
     }
 
-    return generateSlots(date, rule.getStartTime(), rule.getEndTime(),
-        settings, zoneId, existingBookings);
+    if (!meeting.getTimeRules().isEmpty()) {
+      MeetingTimeRule meetingRule = meeting.getTimeRules().stream()
+          .filter(r -> r.getWeekday().equals(dayOfWeek))
+          .findFirst()
+          .orElse(null);
+      if (meetingRule == null) {
+        return List.of();
+      }
+      LocalTime avStart = LocalTime.parse(windowStart);
+      LocalTime avEnd = LocalTime.parse(windowEnd);
+      LocalTime mtStart = LocalTime.parse(meetingRule.getStartTime());
+      LocalTime mtEnd = LocalTime.parse(meetingRule.getEndTime());
+
+      LocalTime isectStart = avStart.isAfter(mtStart) ? avStart : mtStart;
+      LocalTime isectEnd = avEnd.isBefore(mtEnd) ? avEnd : mtEnd;
+
+      if (!isectStart.isBefore(isectEnd)) {
+        return List.of();
+      }
+      windowStart = isectStart.toString();
+      windowEnd = isectEnd.toString();
+    }
+
+    return generateSlots(date, windowStart, windowEnd, meeting, zoneId, existingBookings);
   }
 
   private List<TimeSlot> generateSlots(LocalDate date, String startTime, String endTime,
-      OnlineCallSettings settings, ZoneId zoneId, List<Booking> existingBookings) {
+      Meeting meeting, ZoneId zoneId, List<Booking> existingBookings) {
     List<TimeSlot> slots = new ArrayList<>();
     LocalTime start = LocalTime.parse(startTime);
     LocalTime end = LocalTime.parse(endTime);
-    int interval = settings.getSlotIntervalMinutes();
-    int duration = settings.getDurationMinutes();
+    int interval = meeting.getSlotIntervalMinutes();
+    int duration = meeting.getDurationMinutes();
 
     LocalTime slotStart = start;
     while (!slotStart.isAfter(end.minusMinutes(duration))) {
       ZonedDateTime startZoned = ZonedDateTime.of(date, slotStart, zoneId);
 
       Instant now = Instant.now();
-      if (startZoned.toInstant().isBefore(now.plus(java.time.Duration.ofMinutes(settings.getMinimumNoticeMinutes())))) {
+      if (startZoned.toInstant().isBefore(now.plus(Duration.ofMinutes(meeting.getMinimumNoticeMinutes())))) {
         slotStart = slotStart.plusMinutes(interval);
         continue;
       }
@@ -242,4 +305,31 @@ public class BookingService {
   }
 
   public record TimeSlot(String start, String end, String timezone) {}
+
+  public List<TimeSlot> listSlotsByMeeting(String organizerId, String meetingId, String startDate, String endDate, String timezone) {
+    Meeting meeting = meetingService.getMeeting(meetingId);
+    List<Availability> availabilities = availabilityService.listAvailabilities(organizerId);
+
+    if (availabilities.isEmpty()) {
+      return List.of();
+    }
+
+    Availability availability = availabilities.get(0);
+    ZoneId zoneId = ZoneId.of(timezone);
+    LocalDate start = LocalDate.parse(startDate);
+    LocalDate end = LocalDate.parse(endDate);
+
+    List<Booking> existingBookings = bookingRepository.findByOrganizerIdAndStartBetweenOrderByStartAsc(
+        organizerId, start.atStartOfDay(zoneId).toInstant().toString(),
+        end.plusDays(1).atStartOfDay(zoneId).toInstant().toString());
+
+    List<TimeSlot> slots = new ArrayList<>();
+    LocalDate current = start;
+    while (!current.isAfter(end)) {
+      slots.addAll(generateSlotsForDay(current, availability, meeting, zoneId, existingBookings));
+      current = current.plusDays(1);
+    }
+
+    return slots;
+  }
 }

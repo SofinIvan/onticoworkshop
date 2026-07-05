@@ -1,5 +1,9 @@
 package com.onticoworkshop.dto;
 
+import java.util.List;
+
+import com.onticoworkshop.model.MeetingTimeRule;
+
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -7,9 +11,7 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class UpdateOnlineCallSettingsRequest {
-
-  private String availabilityScheduleId;
+public class UpdateMeetingRequest {
 
   private String title;
 
@@ -21,13 +23,15 @@ public class UpdateOnlineCallSettingsRequest {
 
   private Boolean isActive;
 
-  private Integer minimumNoticeMinutes;
-
   private Integer slotIntervalMinutes;
+
+  private Integer minimumNoticeMinutes;
 
   private Integer bufferBeforeMinutes;
 
   private Integer bufferAfterMinutes;
 
   private String meetingUrl;
+
+  private List<MeetingTimeRule> timeRules;
 }

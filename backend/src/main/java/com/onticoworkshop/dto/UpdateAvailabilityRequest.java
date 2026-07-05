@@ -12,7 +12,7 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class UpdateAvailabilityScheduleRequest {
+public class UpdateAvailabilityRequest {
 
   private String name;
 

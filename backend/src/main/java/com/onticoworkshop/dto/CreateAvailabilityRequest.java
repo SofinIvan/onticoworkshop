@@ -13,10 +13,10 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class CreateAvailabilityScheduleRequest {
+public class CreateAvailabilityRequest {
 
   @NotBlank
-  private String userId;
+  private String organizerId;
 
   @NotBlank
   private String name;

@@ -11,6 +11,7 @@ import {
   Divider,
   Group,
   Loader,
+  Modal,
   NavLink,
   Paper,
   NumberInput,
@@ -25,14 +26,12 @@ import {
   Textarea,
   ThemeIcon,
   Title,
-  Tooltip,
 } from "@mantine/core";
 import {
   CalendarDays,
   Check,
   Clock3,
   Copy,
-  Link,
   Plus,
   Settings2,
   RotateCcw,
@@ -43,12 +42,14 @@ import {
 } from "lucide-react";
 import {
   api,
-  type AvailabilitySchedule,
+  type Availability,
   type AvailabilityRule,
+  type BookingProfile,
   type DateOverride,
   type Booking,
   type BookingInfo,
-  type OnlineCallSettings,
+  type Meeting,
+  type MeetingTimeRule,
   type TimeSlot,
 } from "./api";
 
@@ -139,16 +140,16 @@ const weekdayLabels: Record<AvailabilityRule["weekday"], string> = {
   sunday: "Sunday",
 };
 
-function cloneSchedule(schedule: AvailabilitySchedule) {
+function cloneAvailability(availability: Availability) {
   return {
-    ...schedule,
-    rules: schedule.rules.map((rule) => ({ ...rule })),
-    dateOverrides: schedule.dateOverrides.map((override) => ({ ...override })),
+    ...availability,
+    rules: availability.rules.map((rule) => ({ ...rule })),
+    dateOverrides: availability.dateOverrides.map((override) => ({ ...override })),
   };
 }
 
-function cloneOnlineCall(onlineCall: OnlineCallSettings) {
-  return { ...onlineCall };
+function cloneMeeting(meeting: Meeting) {
+  return { ...meeting };
 }
 
 function normalizeOptionalText(value: string) {
@@ -180,32 +181,34 @@ function createDefaultOverride(): DateOverride {
 function App() {
   const [view, setView] = useState<ViewMode>("booking");
   const [bookingInfo, setBookingInfo] = useState<BookingInfo | null>(null);
-  const [onlineCallDraft, setOnlineCallDraft] = useState<OnlineCallSettings | null>(null);
+  const [meetingDraft, setMeetingDraft] = useState<Meeting | null>(null);
   const [slots, setSlots] = useState<TimeSlot[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
-  const [schedules, setSchedules] = useState<AvailabilitySchedule[]>([]);
-  const [availabilityDraft, setAvailabilityDraft] = useState<AvailabilitySchedule | null>(null);
+  const [availabilities, setAvailabilities] = useState<Availability[]>([]);
+  const [availabilityDraft, setAvailabilityDraft] = useState<Availability | null>(null);
   const [selectedDate, setSelectedDate] = useState(toDateInputValue(addDays(new Date(), 1)));
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
+  const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
   const [guest, setGuest] = useState<GuestForm>({ name: "", email: "", notes: "" });
   const [isLoading, setIsLoading] = useState(true);
-  const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
+  const [isSavingMeeting, setIsSavingMeeting] = useState(false);
+  const [isDeletingMeeting, setIsDeletingMeeting] = useState(false);
   const [isSavingAvailability, setIsSavingAvailability] = useState(false);
   const [isDeletingSchedule, setIsDeletingSchedule] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmation, setConfirmation] = useState<Booking | null>(null);
+  const [workspaceView, setWorkspaceView] = useState<"list" | "edit">("list");
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: "meeting" | "availability"; id: string } | null>(null);
+  const [publicMeetingUuid, setPublicMeetingUuid] = useState<string | null>(null);
+  const [publicMeetingInfo, setPublicMeetingInfo] = useState<{ profile: BookingProfile; meeting: Meeting } | null>(null);
+  const [publicSlots, setPublicSlots] = useState<TimeSlot[]>([]);
+  const [publicGuest, setPublicGuest] = useState<GuestForm>({ name: "", email: "", notes: "" });
+  const [publicBooked, setPublicBooked] = useState<{ start: string; end: string } | null>(null);
+  const [publicError, setPublicError] = useState<string | null>(null);
 
   const dateOptions = useMemo(
     () => Array.from({ length: 7 }, (_, index) => toDateInputValue(addDays(new Date(), index + 1))),
     [],
-  );
-  const scheduleOptions = useMemo(
-    () =>
-      schedules.map((schedule) => ({
-        value: schedule.id,
-        label: schedule.name,
-      })),
-    [schedules],
   );
 
   useEffect(() => {
@@ -218,14 +221,14 @@ function App() {
         if (!isMounted) return;
         setBookingInfo(info);
 
-        const [bookingResponse, scheduleResponse] = await Promise.all([
+        const [bookingResponse, availabilityResponse] = await Promise.all([
           api.listBookings(info.profile.id),
-          api.listAvailabilitySchedules(info.profile.id),
+          api.listAvailabilities(info.profile.id),
         ]);
 
         if (!isMounted) return;
         setBookings(bookingResponse.items);
-        setSchedules(scheduleResponse.items);
+        setAvailabilities(availabilityResponse.items);
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -238,21 +241,26 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const activeSchedule = schedules[0];
-    setAvailabilityDraft(activeSchedule ? cloneSchedule(activeSchedule) : null);
-  }, [schedules]);
+    const firstAvailability = availabilities[0];
+    setAvailabilityDraft(firstAvailability ? cloneAvailability(firstAvailability) : null);
+  }, [availabilities]);
 
   useEffect(() => {
-    setOnlineCallDraft(bookingInfo ? cloneOnlineCall(bookingInfo.onlineCall) : null);
+    if (!bookingInfo) return;
+    setMeetingDraft(bookingInfo.meetings[0] ?? null);
+    if (bookingInfo.meetings.length > 0 && !selectedMeetingId) {
+      setSelectedMeetingId(bookingInfo.meetings[0].id);
+    }
   }, [bookingInfo]);
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadSlots() {
-      if (!bookingInfo) return;
+      if (!bookingInfo || !selectedMeetingId) return;
       const response = await api.listSlots(
         bookingInfo.profile.username,
+        selectedMeetingId,
         selectedDate,
         guestTimezone,
       );
@@ -266,14 +274,103 @@ function App() {
     return () => {
       isMounted = false;
     };
-  }, [bookingInfo, selectedDate]);
+  }, [bookingInfo, selectedMeetingId, selectedDate, guestTimezone]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const uuid = params.get("meeting");
+    if (uuid) {
+      setPublicMeetingUuid(uuid);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!publicMeetingUuid) return;
+    api.getPublicMeeting(publicMeetingUuid).then((info) => {
+      setPublicMeetingInfo(info);
+    });
+  }, [publicMeetingUuid]);
+
+  useEffect(() => {
+    if (!publicMeetingUuid || !publicMeetingInfo) return;
+    const start = toDateInputValue(addDays(new Date(), 1));
+    const end = toDateInputValue(addDays(new Date(), 7));
+    api.listPublicSlots(publicMeetingUuid, start, end, guestTimezone).then((r) => {
+      setPublicSlots(r.items);
+      setSelectedSlot(r.items[0] ?? null);
+    });
+  }, [publicMeetingUuid, publicMeetingInfo]);
+
+  function getPublicSlotsByDate(): Map<string, TimeSlot[]> {
+    const map = new Map<string, TimeSlot[]>();
+    for (const s of publicSlots) {
+      const d = s.start.slice(0, 10);
+      if (!map.has(d)) map.set(d, []);
+      map.get(d)!.push(s);
+    }
+    return map;
+  }
+
+  function handlePublicDateSelect(date: string) {
+    setSelectedDate(date);
+    setPublicError(null);
+    setSelectedSlot(null);
+  }
+
+  async function submitPublicBooking() {
+    if (!publicMeetingUuid || !publicMeetingInfo || !selectedSlot || !publicGuest.name || !publicGuest.email) return;
+    setPublicError(null);
+    setIsSubmitting(true);
+    try {
+      await api.createBooking({
+        username: publicMeetingInfo.profile.username,
+        meetingUuid: publicMeetingUuid,
+        guestName: publicGuest.name,
+        guestEmail: publicGuest.email,
+        guestTimezone,
+        start: selectedSlot.start,
+        notes: publicGuest.notes || undefined,
+      });
+      setPublicBooked({ start: selectedSlot.start, end: selectedSlot.end });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "";
+      if (msg.includes("409") || msg.includes("already registered")) {
+        setPublicError("You are already registered for this meeting");
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  if (publicMeetingUuid && publicMeetingInfo) {
+    return (
+      <PublicBookingPage
+        profile={publicMeetingInfo.profile}
+        meeting={publicMeetingInfo.meeting}
+        slots={publicSlots}
+        selectedSlot={selectedSlot}
+        selectedDate={selectedDate}
+        guest={publicGuest}
+        publicBooked={publicBooked}
+        publicError={publicError}
+        isSubmitting={isSubmitting}
+        dateOptions={dateOptions}
+        onDateSelect={handlePublicDateSelect}
+        onSlotSelect={setSelectedSlot}
+        onGuestChange={setPublicGuest}
+        onSubmit={submitPublicBooking}
+        getSlotsByDate={getPublicSlotsByDate}
+      />
+    );
+  }
 
   async function submitBooking() {
-    if (!bookingInfo || !selectedSlot || !guest.name || !guest.email) return;
+    if (!bookingInfo || !selectedSlot || !guest.name || !guest.email || !selectedMeetingId) return;
     setIsSubmitting(true);
     try {
       const booking = await api.createBooking({
         username: bookingInfo.profile.username,
+        meetingId: selectedMeetingId,
         guestName: guest.name,
         guestEmail: guest.email,
         guestTimezone,
@@ -287,27 +384,95 @@ function App() {
     }
   }
 
-  async function saveWorkspace() {
-    if (!bookingInfo || !onlineCallDraft) return;
-    setIsSavingWorkspace(true);
+  async function handleCreateMeeting(draft: Meeting) {
+    if (!bookingInfo) return;
+    setIsSavingMeeting(true);
     try {
-      const updated = await api.updateOnlineCallSettings(bookingInfo.profile.id, {
-        availabilityScheduleId: onlineCallDraft.availabilityScheduleId,
-        title: onlineCallDraft.title.trim(),
-        description: normalizeOptionalText(onlineCallDraft.description ?? ""),
-        durationMinutes: onlineCallDraft.durationMinutes,
-        timezone: onlineCallDraft.timezone.trim(),
-        isActive: onlineCallDraft.isActive,
-        minimumNoticeMinutes: onlineCallDraft.minimumNoticeMinutes,
-        slotIntervalMinutes: onlineCallDraft.slotIntervalMinutes,
-        bufferBeforeMinutes: onlineCallDraft.bufferBeforeMinutes,
-        bufferAfterMinutes: onlineCallDraft.bufferAfterMinutes,
-        meetingUrl: normalizeOptionalText(onlineCallDraft.meetingUrl ?? ""),
-      });
-      setBookingInfo((current) => (current ? { ...current, onlineCall: updated } : current));
-      setOnlineCallDraft(cloneOnlineCall(updated));
+      const created = await api.createMeeting(bookingInfo.profile.id, draft.title, draft.timezone);
+      const updated = created.id
+        ? await api.updateMeeting(created.id, {
+            description: normalizeOptionalText(draft.description ?? ""),
+            durationMinutes: draft.durationMinutes,
+            isActive: draft.isActive,
+            slotIntervalMinutes: draft.slotIntervalMinutes,
+            minimumNoticeMinutes: draft.minimumNoticeMinutes,
+            bufferBeforeMinutes: draft.bufferBeforeMinutes,
+            bufferAfterMinutes: draft.bufferAfterMinutes,
+            meetingUrl: normalizeOptionalText(draft.meetingUrl ?? ""),
+            timeRules: draft.timeRules,
+          })
+        : created;
+      setBookingInfo((current) =>
+        current ? { ...current, meetings: [...current.meetings, updated] } : null,
+      );
+      setMeetingDraft(cloneMeeting(updated));
+      setWorkspaceView("list");
     } finally {
-      setIsSavingWorkspace(false);
+      setIsSavingMeeting(false);
+    }
+  }
+
+  async function handleUpdateMeeting() {
+    if (!bookingInfo || !meetingDraft) return;
+    setIsSavingMeeting(true);
+    try {
+      const updated = await api.updateMeeting(meetingDraft.id, {
+        title: meetingDraft.title.trim(),
+        description: normalizeOptionalText(meetingDraft.description ?? ""),
+        durationMinutes: meetingDraft.durationMinutes,
+        timezone: meetingDraft.timezone.trim(),
+        isActive: meetingDraft.isActive,
+        minimumNoticeMinutes: meetingDraft.minimumNoticeMinutes,
+        slotIntervalMinutes: meetingDraft.slotIntervalMinutes,
+        bufferBeforeMinutes: meetingDraft.bufferBeforeMinutes,
+        bufferAfterMinutes: meetingDraft.bufferAfterMinutes,
+        meetingUrl: normalizeOptionalText(meetingDraft.meetingUrl ?? ""),
+        timeRules: meetingDraft.timeRules,
+      });
+      setBookingInfo((current) =>
+        current
+          ? {
+              ...current,
+              meetings: current.meetings.map((m) => (m.id === updated.id ? updated : m)),
+            }
+          : null,
+      );
+      setMeetingDraft(cloneMeeting(updated));
+      setWorkspaceView("list");
+    } finally {
+      setIsSavingMeeting(false);
+    }
+  }
+
+  async function handleDeleteMeeting(meetingId: string) {
+    if (!bookingInfo) return;
+    setIsDeletingMeeting(true);
+    try {
+      await api.deleteMeeting(meetingId);
+      setBookingInfo((current) =>
+        current
+          ? { ...current, meetings: current.meetings.filter((m) => m.id !== meetingId) }
+          : null,
+      );
+      setBookings((current) => current.filter((b) => b.meetingId !== meetingId));
+      setMeetingDraft(null);
+      setWorkspaceView("list");
+      setDeleteConfirm(null);
+    } finally {
+      setIsDeletingMeeting(false);
+    }
+  }
+
+  async function handleConfirmDelete() {
+    if (!deleteConfirm) return;
+    try {
+      if (deleteConfirm.type === "meeting") {
+        handleDeleteMeeting(deleteConfirm.id);
+      } else if (deleteConfirm.type === "availability") {
+        await deleteAvailability();
+      }
+    } finally {
+      setDeleteConfirm(null);
     }
   }
 
@@ -315,7 +480,7 @@ function App() {
     if (!availabilityDraft) return;
     setIsSavingAvailability(true);
     try {
-      const updated = await api.updateAvailabilitySchedule(availabilityDraft.id, {
+      const updated = await api.updateAvailability(availabilityDraft.id, {
         name: availabilityDraft.name.trim(),
         timezone: availabilityDraft.timezone.trim(),
         rules: availabilityDraft.rules,
@@ -326,8 +491,10 @@ function App() {
           endTime: normalizeOptionalText(override.endTime ?? ""),
         })),
       });
-      setSchedules((current) => current.map((schedule) => (schedule.id === updated.id ? updated : schedule)));
-      setAvailabilityDraft(cloneSchedule(updated));
+      setAvailabilities((current) =>
+        current.map((a) => (a.id === updated.id ? updated : a)),
+      );
+      setAvailabilityDraft(cloneAvailability(updated));
     } finally {
       setIsSavingAvailability(false);
     }
@@ -335,26 +502,15 @@ function App() {
 
   async function deleteAvailability() {
     if (!availabilityDraft) return;
-    if (schedules.length <= 1) return;
+    if (availabilities.length <= 1) return;
 
     setIsDeletingSchedule(true);
     try {
       const deletedId = availabilityDraft.id;
-      await api.deleteAvailabilitySchedule(deletedId);
-      const remainingSchedules = schedules.filter((schedule) => schedule.id !== deletedId);
-      setSchedules(remainingSchedules);
-      setAvailabilityDraft(remainingSchedules[0] ? cloneSchedule(remainingSchedules[0]) : null);
-      setBookingInfo((current) =>
-        current && current.onlineCall.availabilityScheduleId === deletedId && remainingSchedules[0]
-          ? {
-              ...current,
-              onlineCall: {
-                ...current.onlineCall,
-                availabilityScheduleId: remainingSchedules[0].id,
-              },
-            }
-          : current,
-      );
+      await api.deleteAvailability(deletedId);
+      const remaining = availabilities.filter((a) => a.id !== deletedId);
+      setAvailabilities(remaining);
+      setAvailabilityDraft(remaining[0] ? cloneAvailability(remaining[0]) : null);
     } finally {
       setIsDeletingSchedule(false);
     }
@@ -426,7 +582,10 @@ function App() {
             <Box>
               <Title order={1}>{viewLabels[view]}</Title>
               <Text c="dimmed" size="sm">
-                {bookingInfo.onlineCall.durationMinutes} min · {bookingInfo.onlineCall.timezone}
+                {(() => {
+                  const sm = bookingInfo.meetings.find((m) => m.id === selectedMeetingId);
+                  return sm ? `${sm.title} · ${sm.durationMinutes} min · ${sm.timezone}` : "";
+                })()}
               </Text>
             </Box>
           </Group>
@@ -437,6 +596,7 @@ function App() {
               dateOptions={dateOptions}
               selectedDate={selectedDate}
               selectedSlot={selectedSlot}
+              selectedMeetingId={selectedMeetingId}
               slots={slots}
               bookings={bookings}
               guest={guest}
@@ -450,38 +610,94 @@ function App() {
                 setSelectedSlot(slot);
                 setConfirmation(null);
               }}
+              onSelectMeeting={(id) => {
+                setSelectedMeetingId(id);
+                setSelectedSlot(null);
+                setConfirmation(null);
+              }}
               onGuestChange={setGuest}
               onSubmit={submitBooking}
             />
           ) : view === "workspace" ? (
             <WorkspaceView
-              bookingInfo={bookingInfo}
-              scheduleOptions={scheduleOptions}
-              draft={onlineCallDraft}
-              isSaving={isSavingWorkspace}
-              onDraftChange={(nextDraft) => setOnlineCallDraft(nextDraft)}
-              onReset={() => {
-                setOnlineCallDraft(cloneOnlineCall(bookingInfo.onlineCall));
+              meetings={bookingInfo.meetings}
+              bookings={bookings}
+              meetingDraft={meetingDraft}
+              workspaceView={workspaceView}
+              isSaving={isSavingMeeting}
+              isDeleting={isDeletingMeeting}
+              onCancel={() => {
+                setWorkspaceView("list");
+                setMeetingDraft(null);
               }}
-              onSave={saveWorkspace}
+              onEdit={(meeting) => {
+                setMeetingDraft(cloneMeeting(meeting));
+                setWorkspaceView("edit");
+              }}
+              onCreateNew={() => {
+                setMeetingDraft({
+                  id: "",
+                  organizerId: bookingInfo.profile.id,
+                  uuid: "",
+                  title: "",
+                  description: "",
+                  durationMinutes: 30,
+                  timezone: bookingInfo.profile.timezone,
+                  isActive: true,
+                  slotIntervalMinutes: 30,
+                  minimumNoticeMinutes: 120,
+                  bufferBeforeMinutes: 10,
+                  bufferAfterMinutes: 10,
+                  meetingUrl: "",
+                  timeRules: [],
+                  createdAt: "",
+                  updatedAt: "",
+                });
+                setWorkspaceView("edit");
+              }}
+              onDraftChange={(nextDraft) => setMeetingDraft(nextDraft)}
+              onSave={() => {
+                if (meetingDraft?.id) {
+                  handleUpdateMeeting();
+                } else if (meetingDraft) {
+                  handleCreateMeeting(meetingDraft);
+                }
+              }}
+              onRequestDelete={(id) => setDeleteConfirm({ type: "meeting", id })}
             />
           ) : view === "availability" ? (
             <AvailabilityView
               draft={availabilityDraft}
               isDeleting={isDeletingSchedule}
               isSaving={isSavingAvailability}
-              canDelete={schedules.length > 1}
+              canDelete={availabilities.length > 1}
               onDraftChange={(nextDraft) => setAvailabilityDraft(nextDraft)}
-              onDelete={deleteAvailability}
+              onDelete={() => setDeleteConfirm({ type: "availability", id: availabilityDraft?.id ?? "" })}
               onReset={() => {
-                const activeSchedule = schedules[0];
-                setAvailabilityDraft(activeSchedule ? cloneSchedule(activeSchedule) : null);
+                const firstAvailability = availabilities[0];
+                setAvailabilityDraft(firstAvailability ? cloneAvailability(firstAvailability) : null);
               }}
               onSave={saveAvailability}
             />
           ) : null}
         </Container>
       </AppShell.Main>
+
+      <Modal
+        opened={deleteConfirm !== null}
+        onClose={() => setDeleteConfirm(null)}
+        title="Confirm deletion"
+        centered
+      >
+        <Text mb="lg">
+          Are you sure you want to delete this {deleteConfirm?.type === "meeting" ? "meeting" : "availability"}?
+          {deleteConfirm?.type === "meeting" ? " All bookings for this meeting will also be deleted." : ""}
+        </Text>
+        <Group justify="flex-end">
+          <Button variant="default" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+          <Button color="red" onClick={handleConfirmDelete}>Delete</Button>
+        </Group>
+      </Modal>
     </AppShell>
   );
 }
@@ -491,6 +707,7 @@ type BookingViewProps = {
   dateOptions: string[];
   selectedDate: string;
   selectedSlot: TimeSlot | null;
+  selectedMeetingId: string | null;
   slots: TimeSlot[];
   bookings: Booking[];
   guest: GuestForm;
@@ -498,6 +715,7 @@ type BookingViewProps = {
   isSubmitting: boolean;
   onDateChange: (value: string) => void;
   onSlotChange: (slot: TimeSlot) => void;
+  onSelectMeeting: (id: string) => void;
   onGuestChange: (guest: GuestForm) => void;
   onSubmit: () => void;
 };
@@ -507,6 +725,7 @@ function BookingView({
   dateOptions,
   selectedDate,
   selectedSlot,
+  selectedMeetingId,
   slots,
   bookings,
   guest,
@@ -514,13 +733,95 @@ function BookingView({
   isSubmitting,
   onDateChange,
   onSlotChange,
+  onSelectMeeting,
   onGuestChange,
   onSubmit,
 }: BookingViewProps) {
   const canSubmit = Boolean(selectedSlot && guest.name && guest.email);
+  const selectedMeeting = bookingInfo.meetings.find((m) => m.id === selectedMeetingId);
+  const activeMeetings = bookingInfo.meetings.filter((m) => m.isActive);
+
+  if (!selectedMeetingId) {
+    return (
+      <Stack>
+        <Card withBorder>
+          <Stack p="md">
+            <Group gap="sm">
+              <Avatar size={48} src={bookingInfo.profile.avatarUrl} radius="xl" color="dark">
+                {initials(bookingInfo.profile.displayName)}
+              </Avatar>
+              <Box>
+                <Text fw={650}>{bookingInfo.profile.displayName}</Text>
+                <Text size="sm" c="dimmed">
+                  {bookingInfo.profile.bio}
+                </Text>
+              </Box>
+            </Group>
+          </Stack>
+        </Card>
+
+        <Text fw={600}>Select a meeting</Text>
+        <SimpleGrid cols={{ base: 1, sm: 2 }}>
+          {activeMeetings.map((m) => (
+            <Card
+              key={m.id}
+              withBorder
+              padding="lg"
+              style={{ cursor: "pointer" }}
+              onClick={() => onSelectMeeting(m.id)}
+            >
+              <Group justify="space-between" mb="xs">
+                <Text fw={600}>{m.title}</Text>
+                <Badge color="green" variant="light">{m.durationMinutes}m</Badge>
+              </Group>
+              {m.timeRules.length > 0 && (
+                <Text size="xs" c="dimmed" mb="xs">
+                  {m.timeRules.map((r) => `${r.weekday.slice(0, 3)} ${r.startTime.slice(0, 5)}-${r.endTime.slice(0, 5)}`).join(" · ")}
+                </Text>
+              )}
+              <Text size="sm" c="dimmed" lineClamp={2} mb="md">
+                {m.description || "Online meeting"}
+              </Text>
+              {m.uuid && (
+                <Button
+                  variant="light"
+                  size="xs"
+                  leftSection={<Copy size={14} />}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigator.clipboard.writeText(`${window.location.origin}/?meeting=${m.uuid}`);
+                  }}
+                >
+                  Copy link
+                </Button>
+              )}
+            </Card>
+          ))}
+        </SimpleGrid>
+
+        <BookingsView bookings={bookings} meetings={bookingInfo.meetings} />
+      </Stack>
+    );
+  }
 
   return (
     <Stack>
+      <Group gap="xs">
+        {bookingInfo.meetings
+          .filter((m) => m.isActive)
+          .map((m) => (
+            <Badge
+              key={m.id}
+              size="lg"
+              variant={m.id === selectedMeetingId ? "filled" : "outline"}
+              color="dark"
+              style={{ cursor: "pointer" }}
+              onClick={() => onSelectMeeting(m.id)}
+            >
+              {m.title} ({m.durationMinutes}m)
+            </Badge>
+          ))}
+      </Group>
       <Card withBorder>
         <SimpleGrid cols={{ base: 1, md: 3 }} spacing={0}>
           <Stack p="md">
@@ -539,9 +840,12 @@ function BookingView({
             <Divider />
 
             <Stack gap="md">
-              <InfoRow icon={<Clock3 size={16} />} text={`${bookingInfo.onlineCall.durationMinutes} minutes`} />
-              <InfoRow icon={<Video size={16} />} text="Online meeting" />
+              <InfoRow icon={<Clock3 size={16} />} text={`${selectedMeeting?.durationMinutes ?? 30} minutes`} />
+              <InfoRow icon={<Video size={16} />} text={selectedMeeting?.title ?? ""} />
               <InfoRow icon={<UserRound size={16} />} text={guestTimezone} />
+              <Button variant="subtle" size="xs" onClick={() => onSelectMeeting("")} pl={0}>
+                ← Choose another meeting
+              </Button>
             </Stack>
           </Stack>
 
@@ -557,28 +861,43 @@ function BookingView({
               {dateOptions.map((dateValue) => (
                 <Button
                   key={dateValue}
+                  size="sm"
                   variant={dateValue === selectedDate ? "filled" : "default"}
                   color="dark"
                   onClick={() => onDateChange(dateValue)}
                 >
-                  {new Date(`${dateValue}T12:00:00`).getDate()}
+                  {formatDayLabel(dateValue)}
                 </Button>
               ))}
             </SimpleGrid>
 
             <ScrollArea h={330} offsetScrollbars>
-              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="xs">
+              <Stack gap={4}>
                 {slots.map((slot) => (
-                  <Button
+                  <Paper
                     key={slot.start}
-                    variant={selectedSlot?.start === slot.start ? "filled" : "default"}
-                    color="dark"
+                    withBorder
+                    p="sm"
+                    style={{
+                      cursor: "pointer",
+                      backgroundColor: selectedSlot?.start === slot.start ? "var(--mantine-color-dark-1)" : undefined,
+                    }}
                     onClick={() => onSlotChange(slot)}
                   >
-                    {formatTime(slot.start, guestTimezone)}
-                  </Button>
+                    <Group justify="space-between">
+                      <Text size="sm" fw={selectedSlot?.start === slot.start ? 700 : 400} c={selectedSlot?.start === slot.start ? "white" : undefined}>
+                        {formatTime(slot.start, guestTimezone)} — {formatTime(slot.end, guestTimezone)}
+                      </Text>
+                      <Badge variant="light" size="sm" color={selectedSlot?.start === slot.start ? "white" : "gray"}>
+                        {(() => {
+                          const m = bookingInfo.meetings.find((x) => x.id === selectedMeetingId);
+                          return `${m?.durationMinutes ?? 30}m`;
+                        })()}
+                      </Badge>
+                    </Group>
+                  </Paper>
                 ))}
-              </SimpleGrid>
+              </Stack>
             </ScrollArea>
           </Stack>
 
@@ -641,212 +960,310 @@ function BookingView({
         </SimpleGrid>
       </Card>
 
-      <BookingsView bookings={bookings} />
+      <BookingsView bookings={bookings} meetings={bookingInfo.meetings} />
     </Stack>
   );
 }
 
 type WorkspaceViewProps = {
-  bookingInfo: BookingInfo;
-  scheduleOptions: Array<{ value: string; label: string }>;
-  draft: OnlineCallSettings | null;
+  meetings: Meeting[];
+  bookings: Booking[];
+  meetingDraft: Meeting | null;
+  workspaceView: "list" | "edit";
   isSaving: boolean;
-  onDraftChange: (draft: OnlineCallSettings) => void;
-  onReset: () => void;
+  isDeleting: boolean;
+  onCancel: () => void;
+  onEdit: (meeting: Meeting) => void;
+  onCreateNew: () => void;
+  onDraftChange: (draft: Meeting) => void;
   onSave: () => void;
+  onRequestDelete: (id: string) => void;
 };
 
 function WorkspaceView({
-  bookingInfo,
-  scheduleOptions,
-  draft,
+  meetings,
+  bookings,
+  meetingDraft,
+  workspaceView,
   isSaving,
+  isDeleting,
+  onCancel,
+  onEdit,
+  onCreateNew,
   onDraftChange,
-  onReset,
   onSave,
+  onRequestDelete,
 }: WorkspaceViewProps) {
-  const settings = draft ?? bookingInfo.onlineCall;
-  const bookingUrl = `${window.location.origin}/?username=${bookingInfo.profile.username}`;
-  const canSave = Boolean(settings.title.trim() && settings.timezone.trim());
+  if (workspaceView === "edit" && meetingDraft) {
+    const settings = meetingDraft;
+    const canSave = Boolean(settings.title.trim() && settings.timezone.trim());
+    const isNew = !settings.id;
+
+    return (
+      <Card withBorder>
+      <Stack gap="lg">
+        <Group justify="space-between" align="flex-start">
+          <Box>
+            <Title order={2}>{isNew ? "New meeting" : settings.title}</Title>
+          </Box>
+          <Badge color={settings.isActive ? "green" : "gray"} variant="light">
+            {settings.isActive ? "Active" : "Paused"}
+          </Badge>
+        </Group>
+
+        <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg">
+          <Stack gap="md">
+            <TextInput
+              label="Title"
+              value={settings.title}
+              onChange={(event) => onDraftChange({ ...settings, title: event.currentTarget.value })}
+            />
+            <Textarea
+              label="Description"
+              minRows={3}
+              value={settings.description ?? ""}
+              onChange={(event) => onDraftChange({ ...settings, description: event.currentTarget.value })}
+            />
+            <TextInput
+              label="Meeting URL"
+              value={settings.meetingUrl ?? ""}
+              onChange={(event) => onDraftChange({ ...settings, meetingUrl: event.currentTarget.value })}
+            />
+            <TextInput
+              label="Timezone"
+              value={settings.timezone}
+              onChange={(event) => onDraftChange({ ...settings, timezone: event.currentTarget.value })}
+            />
+            <Switch
+              label="Active"
+              checked={settings.isActive}
+              onChange={(event) => onDraftChange({ ...settings, isActive: event.currentTarget.checked })}
+            />
+          </Stack>
+
+          <Stack gap="md">
+            <SimpleGrid cols={{ base: 1, sm: 2 }}>
+              <NumberInput
+                label="Duration"
+                min={5} step={5}
+                value={settings.durationMinutes}
+                onChange={(value) => onDraftChange({ ...settings, durationMinutes: typeof value === "number" ? value : settings.durationMinutes })}
+              />
+              <NumberInput
+                label="Minimum notice"
+                min={0} step={15}
+                value={settings.minimumNoticeMinutes}
+                onChange={(value) => onDraftChange({ ...settings, minimumNoticeMinutes: typeof value === "number" ? value : settings.minimumNoticeMinutes })}
+              />
+              <NumberInput
+                label="Slot interval"
+                min={5} step={5}
+                value={settings.slotIntervalMinutes}
+                onChange={(value) => onDraftChange({ ...settings, slotIntervalMinutes: typeof value === "number" ? value : settings.slotIntervalMinutes })}
+              />
+              <NumberInput
+                label="Buffer before"
+                min={0} step={5}
+                value={settings.bufferBeforeMinutes}
+                onChange={(value) => onDraftChange({ ...settings, bufferBeforeMinutes: typeof value === "number" ? value : settings.bufferBeforeMinutes })}
+              />
+              <NumberInput
+                label="Buffer after"
+                min={0} step={5}
+                value={settings.bufferAfterMinutes}
+                onChange={(value) => onDraftChange({ ...settings, bufferAfterMinutes: typeof value === "number" ? value : settings.bufferAfterMinutes })}
+              />
+            </SimpleGrid>
+
+            <Box>
+              <Group justify="space-between" align="center" mb="xs">
+                <Box>
+                  <Text fw={600}>Time restrictions</Text>
+                  <Text size="xs" c="dimmed">
+                    Limit this meeting to specific weekdays and hours. Leave empty to use full availability.
+                  </Text>
+                </Box>
+              </Group>
+
+              <Group gap="xs" align="flex-end">
+                <Select
+                  placeholder="Pick a day"
+                  data={weekdayOrder
+                    .filter((w) => !(settings.timeRules ?? []).some((r) => r.weekday === w))
+                    .map((w) => ({ value: w, label: weekdayLabels[w] }))
+                  }
+                  value={null}
+                  onChange={(value) => {
+                    if (value) {
+                      onDraftChange({
+                        ...settings,
+                        timeRules: [...(settings.timeRules ?? []), { weekday: value as MeetingTimeRule["weekday"], startTime: "09:00", endTime: "17:00" }],
+                      });
+                    }
+                  }}
+                  disabled={(settings.timeRules ?? []).length >= 7}
+                  clearable={false}
+                  w={160}
+                />
+              </Group>
+
+              <Stack gap="xs">
+                {weekdayOrder.map((weekday) => {
+                  const rule = (settings.timeRules ?? []).find((r) => r.weekday === weekday);
+                  if (!rule) return null;
+
+                  return (
+                    <Paper key={weekday} withBorder p="sm">
+                      <Group align="flex-end" justify="space-between" wrap="nowrap">
+                        <Text size="sm" w={110} tt="capitalize">
+                          {weekdayLabels[weekday]}
+                        </Text>
+                        <TextInput
+                          label="Start"
+                          type="time"
+                          value={rule.startTime}
+                          onChange={(event) =>
+                            onDraftChange({
+                              ...settings,
+                              timeRules: (settings.timeRules ?? []).map((r) =>
+                                r.weekday === weekday ? { ...r, startTime: event.currentTarget.value } : r,
+                              ),
+                            })
+                          }
+                        />
+                        <TextInput
+                          label="End"
+                          type="time"
+                          value={rule.endTime}
+                          onChange={(event) =>
+                            onDraftChange({
+                              ...settings,
+                              timeRules: (settings.timeRules ?? []).map((r) =>
+                                r.weekday === weekday ? { ...r, endTime: event.currentTarget.value } : r,
+                              ),
+                            })
+                          }
+                        />
+                        <ActionIcon
+                          variant="default"
+                          aria-label={`Remove ${weekdayLabels[weekday]} rule`}
+                          onClick={() =>
+                            onDraftChange({
+                              ...settings,
+                              timeRules: (settings.timeRules ?? []).filter((r) => r.weekday !== weekday),
+                            })
+                          }
+                        >
+                          <Trash2 size={16} />
+                        </ActionIcon>
+                      </Group>
+                    </Paper>
+                  );
+                })}
+              </Stack>
+            </Box>
+
+            <SimpleGrid cols={{ base: 1, sm: 2 }}>
+              <Metric icon={<Clock3 size={16} />} label="Duration" value={`${settings.durationMinutes}m`} />
+              <Metric icon={<CalendarDays size={16} />} label="Notice" value={`${settings.minimumNoticeMinutes}m`} />
+              <Metric icon={<Settings2 size={16} />} label="Interval" value={`${settings.slotIntervalMinutes}m`} />
+              <Metric icon={<Video size={16} />} label="Buffer" value={`${settings.bufferBeforeMinutes}/${settings.bufferAfterMinutes}m`} />
+            </SimpleGrid>
+          </Stack>
+        </SimpleGrid>
+
+        <Group justify="space-between" align="center" wrap="nowrap">
+          <Group>
+            {!isNew && (
+              <Button variant="light" color="red" leftSection={<Trash2 size={16} />} loading={isDeleting} onClick={() => onRequestDelete(settings.id)}>
+                Delete
+              </Button>
+            )}
+          </Group>
+          <Group>
+            <Button variant="default" onClick={onCancel}>Cancel</Button>
+            <Button color="dark" loading={isSaving} disabled={!canSave} onClick={onSave}>
+              {isNew ? "Create" : "Save changes"}
+            </Button>
+          </Group>
+        </Group>
+      </Stack>
+      </Card>
+    );
+  }
 
   return (
     <Stack>
-      <Card withBorder>
-        <Stack gap="lg">
-          <Group justify="space-between" align="flex-start">
-            <Box>
-              <Title order={2}>{settings.title}</Title>
-              <Text size="sm" c="dimmed">
-                {settings.description}
-              </Text>
-            </Box>
-            <Badge color={settings.isActive ? "green" : "gray"} variant="light">
-              {settings.isActive ? "Active" : "Paused"}
-            </Badge>
-          </Group>
+      <Group justify="space-between" align="center">
+        <Title order={2}>Meetings</Title>
+        <Button leftSection={<Plus size={16} />} onClick={onCreateNew}>
+          New meeting
+        </Button>
+      </Group>
 
-          <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg">
-            <Stack gap="md">
-              <TextInput
-                label="Title"
-                value={settings.title}
-                onChange={(event) => onDraftChange({ ...settings, title: event.currentTarget.value })}
-              />
-              <Textarea
-                label="Description"
-                minRows={3}
-                value={settings.description ?? ""}
-                onChange={(event) =>
-                  onDraftChange({ ...settings, description: event.currentTarget.value })
-                }
-              />
-              <TextInput
-                label="Meeting URL"
-                value={settings.meetingUrl ?? ""}
-                onChange={(event) =>
-                  onDraftChange({ ...settings, meetingUrl: event.currentTarget.value })
-                }
-              />
-              <TextInput
-                label="Timezone"
-                value={settings.timezone}
-                onChange={(event) => onDraftChange({ ...settings, timezone: event.currentTarget.value })}
-              />
-              <Select
-                label="Availability schedule"
-                data={scheduleOptions}
-                value={settings.availabilityScheduleId}
-                onChange={(value) =>
-                  value ? onDraftChange({ ...settings, availabilityScheduleId: value }) : undefined
-                }
-                searchable
-                nothingFoundMessage="No schedules"
-              />
-              <Switch
-                label="Active"
-                checked={settings.isActive}
-                onChange={(event) => onDraftChange({ ...settings, isActive: event.currentTarget.checked })}
-              />
-            </Stack>
-
-            <Stack gap="md">
-              <SimpleGrid cols={{ base: 1, sm: 2 }}>
-                <NumberInput
-                  label="Duration"
-                  min={5}
-                  step={5}
-                  value={settings.durationMinutes}
-                  onChange={(value) =>
-                    onDraftChange({
-                      ...settings,
-                      durationMinutes: typeof value === "number" ? value : settings.durationMinutes,
-                    })
-                  }
-                />
-                <NumberInput
-                  label="Minimum notice"
-                  min={0}
-                  step={15}
-                  value={settings.minimumNoticeMinutes}
-                  onChange={(value) =>
-                    onDraftChange({
-                      ...settings,
-                      minimumNoticeMinutes:
-                        typeof value === "number" ? value : settings.minimumNoticeMinutes,
-                    })
-                  }
-                />
-                <NumberInput
-                  label="Slot interval"
-                  min={5}
-                  step={5}
-                  value={settings.slotIntervalMinutes}
-                  onChange={(value) =>
-                    onDraftChange({
-                      ...settings,
-                      slotIntervalMinutes:
-                        typeof value === "number" ? value : settings.slotIntervalMinutes,
-                    })
-                  }
-                />
-                <NumberInput
-                  label="Buffer before"
-                  min={0}
-                  step={5}
-                  value={settings.bufferBeforeMinutes}
-                  onChange={(value) =>
-                    onDraftChange({
-                      ...settings,
-                      bufferBeforeMinutes:
-                        typeof value === "number" ? value : settings.bufferBeforeMinutes,
-                    })
-                  }
-                />
-                <NumberInput
-                  label="Buffer after"
-                  min={0}
-                  step={5}
-                  value={settings.bufferAfterMinutes}
-                  onChange={(value) =>
-                    onDraftChange({
-                      ...settings,
-                      bufferAfterMinutes:
-                        typeof value === "number" ? value : settings.bufferAfterMinutes,
-                    })
-                  }
-                />
-              </SimpleGrid>
-
-              <SimpleGrid cols={{ base: 1, sm: 2 }}>
-                <Metric icon={<Clock3 size={16} />} label="Duration" value={`${settings.durationMinutes}m`} />
-                <Metric icon={<CalendarDays size={16} />} label="Notice" value={`${settings.minimumNoticeMinutes}m`} />
-                <Metric icon={<Settings2 size={16} />} label="Interval" value={`${settings.slotIntervalMinutes}m`} />
-                <Metric icon={<Video size={16} />} label="Buffer" value={`${settings.bufferBeforeMinutes}/${settings.bufferAfterMinutes}m`} />
-              </SimpleGrid>
-
-              <Group justify="space-between" gap="sm" wrap="nowrap">
-                <Group gap="sm" wrap="nowrap">
-                  <ThemeIcon variant="light" color="gray">
-                    <Link size={16} />
-                  </ThemeIcon>
-                  <Text size="sm" truncate="end">
-                    {bookingUrl}
-                  </Text>
-                </Group>
-                <Tooltip label="Copy link">
-                  <ActionIcon variant="default" aria-label="Copy link">
-                    <Copy size={16} />
-                  </ActionIcon>
-                </Tooltip>
+      {meetings.length === 0 ? (
+        <Card withBorder>
+          <Text c="dimmed">No meetings yet. Create your first one.</Text>
+        </Card>
+      ) : (
+        <SimpleGrid cols={{ base: 1, sm: 2 }}>
+          {meetings.map((m) => (
+            <Card key={m.id} withBorder padding="lg">
+              <Group justify="space-between" mb="xs">
+                <Text fw={600}>{m.title}</Text>
+                <Badge color={m.isActive ? "green" : "gray"} variant="light">
+                  {m.isActive ? "Active" : "Paused"}
+                </Badge>
               </Group>
-            </Stack>
-          </SimpleGrid>
-
-          <Group justify="space-between" align="center" wrap="nowrap">
-            <Text size="sm" c="dimmed">
-              Update settings through the online-call API.
-            </Text>
-            <Group>
-              <Button variant="default" onClick={onReset}>
-                Reset
-              </Button>
-              <Button color="dark" loading={isSaving} disabled={!canSave} onClick={onSave}>
-                Save changes
-              </Button>
-            </Group>
-          </Group>
-        </Stack>
-      </Card>
+              <Text size="sm" c="dimmed" mb="xs">
+                {m.durationMinutes} min · {m.timezone}
+              </Text>
+              {m.timeRules.length > 0 && (
+                <Text size="xs" c="dimmed" mb="xs">
+                  {m.timeRules.map((r) => `${r.weekday.slice(0, 3)} ${r.startTime.slice(0, 5)}-${r.endTime.slice(0, 5)}`).join(" · ")}
+                </Text>
+              )}
+              <Text size="sm" c="dimmed" lineClamp={2} mb="md">
+                {m.description || "No description"}
+              </Text>
+              {(() => {
+                const meetingBookings = bookings.filter((b) => b.meetingId === m.id);
+                return meetingBookings.length > 0 ? (
+                  <Text size="xs" c="dimmed" mb="xs">
+                    {meetingBookings.length} participant{meetingBookings.length > 1 ? "s" : ""}: {meetingBookings.map((b) => b.guest.name).join(", ")}
+                  </Text>
+                ) : null;
+              })()}
+              <Group>
+                {m.uuid && (
+                  <Button
+                    variant="light"
+                    size="xs"
+                    leftSection={<Copy size={14} />}
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${window.location.origin}/?meeting=${m.uuid}`);
+                    }}
+                  >
+                    Copy link
+                  </Button>
+                )}
+                <Button variant="light" size="xs" onClick={() => onEdit(m)}>Edit</Button>
+                <Button variant="light" color="red" size="xs" onClick={() => onRequestDelete(m.id)}>Delete</Button>
+              </Group>
+            </Card>
+          ))}
+        </SimpleGrid>
+      )}
     </Stack>
   );
 }
 
 type AvailabilityViewProps = {
-  draft: AvailabilitySchedule | null;
+  draft: Availability | null;
   isSaving: boolean;
   isDeleting: boolean;
   canDelete: boolean;
-  onDraftChange: (draft: AvailabilitySchedule) => void;
+  onDraftChange: (draft: Availability) => void;
   onDelete: () => void;
   onReset: () => void;
   onSave: () => void;
@@ -1126,28 +1543,108 @@ function AvailabilityView({
 
 type BookingsViewProps = {
   bookings: Booking[];
+  meetings: Meeting[];
 };
 
-function BookingsView({ bookings }: BookingsViewProps) {
+function BookingsView({ bookings, meetings }: BookingsViewProps) {
+  const [filterMeetingId, setFilterMeetingId] = useState<string | null>(null);
+  const [filterGuestEmail, setFilterGuestEmail] = useState<string | null>(null);
+  const [sortField, setSortField] = useState<"guest" | "meeting" | "time" | "status">("time");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  function getMeetingTitle(meetingId: string) {
+    return meetings.find((m) => m.id === meetingId)?.title ?? meetingId;
+  }
+
+  const guestOptions = Array.from(
+    new Map(bookings.map((b) => [b.guest.email, { value: b.guest.email, label: `${b.guest.name} (${b.guest.email})` }])).values()
+  );
+
+  let filtered = bookings;
+  if (filterMeetingId) filtered = filtered.filter((b) => b.meetingId === filterMeetingId);
+  if (filterGuestEmail) filtered = filtered.filter((b) => b.guest.email === filterGuestEmail);
+  const dir = sortDir === "asc" ? 1 : -1;
+  filtered = [...filtered].sort((a, b) => {
+    switch (sortField) {
+      case "guest": return dir * a.guest.name.localeCompare(b.guest.name);
+      case "meeting": return dir * getMeetingTitle(a.meetingId).localeCompare(getMeetingTitle(b.meetingId));
+      case "time": return dir * (new Date(a.start).getTime() - new Date(b.start).getTime());
+      case "status": return dir * a.status.localeCompare(b.status);
+      default: return 0;
+    }
+  });
+
+  function toggleSort(field: typeof sortField) {
+    if (sortField === field) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortDir("asc");
+    }
+  }
+
+  function sortIndicator(field: typeof sortField) {
+    if (sortField !== field) return "";
+    return sortDir === "asc" ? " ▲" : " ▼";
+  }
+
+  const meetingOptions = meetings.map((m) => ({ value: m.id, label: m.title }));
+
   return (
     <Card withBorder>
       <Group justify="space-between" mb="md">
         <Title order={2}>Bookings</Title>
         <Badge variant="outline" color="gray">
-          {bookings.length}
+          {filtered.length} / {bookings.length}
         </Badge>
       </Group>
+
+      <Group mb="md" gap="sm">
+        <Select
+          placeholder="All meetings"
+          data={meetingOptions}
+          value={filterMeetingId}
+          onChange={(_v) => setFilterMeetingId(_v)}
+          allowDeselect
+          searchable
+          w={200}
+        />
+        <Select
+          placeholder="All guests"
+          data={guestOptions}
+          value={filterGuestEmail}
+          onChange={(_v) => setFilterGuestEmail(_v)}
+          allowDeselect
+          searchable
+          w={260}
+        />
+      </Group>
+
       <Table.ScrollContainer minWidth={640}>
+        {filtered.length === 0 ? (
+          <Text c="dimmed" py="md" ta="center">
+            {bookings.length === 0 ? "No bookings yet" : "No bookings match your filters"}
+          </Text>
+        ) : (
         <Table verticalSpacing="md" highlightOnHover>
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>Guest</Table.Th>
-              <Table.Th>Time</Table.Th>
-              <Table.Th>Status</Table.Th>
+              <Table.Th style={{ cursor: "pointer" }} onClick={() => toggleSort("guest")}>
+                Guest{sortIndicator("guest")}
+              </Table.Th>
+              <Table.Th style={{ cursor: "pointer" }} onClick={() => toggleSort("meeting")}>
+                Meeting{sortIndicator("meeting")}
+              </Table.Th>
+              <Table.Th style={{ cursor: "pointer" }} onClick={() => toggleSort("time")}>
+                Time{sortIndicator("time")}
+              </Table.Th>
+              <Table.Th style={{ cursor: "pointer" }} onClick={() => toggleSort("status")}>
+                Status{sortIndicator("status")}
+              </Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {bookings.map((booking) => (
+            {filtered.map((booking) => (
               <Table.Tr key={booking.id}>
                 <Table.Td>
                   <Text size="sm" fw={600}>
@@ -1156,6 +1653,9 @@ function BookingsView({ bookings }: BookingsViewProps) {
                   <Text size="xs" c="dimmed">
                     {booking.guest.email}
                   </Text>
+                </Table.Td>
+                <Table.Td>
+                  <Text size="sm">{getMeetingTitle(booking.meetingId)}</Text>
                 </Table.Td>
                 <Table.Td>
                   <Text size="sm">{formatLongDate(booking.start, booking.timezone)}</Text>
@@ -1172,6 +1672,7 @@ function BookingsView({ bookings }: BookingsViewProps) {
             ))}
           </Table.Tbody>
         </Table>
+        )}
       </Table.ScrollContainer>
     </Card>
   );
@@ -1218,3 +1719,167 @@ function Metric({ icon, label, value }: MetricProps) {
 }
 
 export default App;
+
+type PublicBookingPageProps = {
+  profile: BookingProfile;
+  meeting: Meeting;
+  slots: TimeSlot[];
+  selectedSlot: TimeSlot | null;
+  selectedDate: string;
+  guest: GuestForm;
+  publicBooked: { start: string; end: string } | null;
+  publicError: string | null;
+  isSubmitting: boolean;
+  dateOptions: string[];
+  onDateSelect: (date: string) => void;
+  onSlotSelect: (slot: TimeSlot) => void;
+  onGuestChange: (guest: GuestForm) => void;
+  onSubmit: () => void;
+  getSlotsByDate: () => Map<string, TimeSlot[]>;
+};
+
+function PublicBookingPage({
+  profile,
+  meeting,
+  slots: _slots,
+  selectedSlot,
+  selectedDate,
+  guest,
+  publicBooked,
+  publicError,
+  isSubmitting,
+  dateOptions: _dateOptions,
+  onDateSelect,
+  onSlotSelect,
+  onGuestChange,
+  onSubmit,
+  getSlotsByDate,
+}: PublicBookingPageProps) {
+  const slotsByDate = getSlotsByDate();
+  const availableDates = Array.from(slotsByDate.keys()).sort();
+  const todaySlots = slotsByDate.get(selectedDate) ?? [];
+
+  return (
+    <Container size="md" py="xl">
+      <Stack gap="lg">
+        <Card withBorder p="lg">
+          <Group gap="md" wrap="nowrap">
+            <Avatar size={56} src={profile.avatarUrl} radius="xl" color="dark">
+              {initials(profile.displayName)}
+            </Avatar>
+            <Box>
+              <Text fw={700} size="lg">{meeting.title}</Text>
+              <Group gap="xs" mt={4}>
+                <Badge variant="light" color="dark">{meeting.durationMinutes} min</Badge>
+                <Badge variant="outline" color="gray">{meeting.timezone}</Badge>
+              </Group>
+            </Box>
+          </Group>
+          {meeting.description && (
+            <Text size="sm" c="dimmed" mt="md">{meeting.description}</Text>
+          )}
+          <Group mt="md" gap="sm">
+            <Text size="sm" c="dimmed">by {profile.displayName}</Text>
+            {profile.bio && <Text size="sm" c="dimmed">— {profile.bio}</Text>}
+          </Group>
+        </Card>
+
+        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">
+          <Card withBorder p="md">
+            <Stack>
+              <Title order={3}>Select date & time</Title>
+              {availableDates.length === 0 ? (
+                <Text c="dimmed" size="sm" py="md">No available slots</Text>
+              ) : (
+                <>
+                  <Group gap="xs" wrap="nowrap">
+                    {availableDates.map((dateValue) => (
+                      <Button
+                        key={dateValue}
+                        size="sm"
+                        variant={dateValue === selectedDate ? "filled" : "default"}
+                        color="dark"
+                        onClick={() => onDateSelect(dateValue)}
+                      >
+                        {formatDayLabel(dateValue)}
+                      </Button>
+                    ))}
+                  </Group>
+
+                  {todaySlots.length === 0 ? (
+                    <Text c="dimmed" size="sm" py="md">No slots for this date</Text>
+                  ) : (
+                    <ScrollArea h={250} offsetScrollbars>
+                      <Stack gap={4}>
+                        {todaySlots.map((slot) => (
+                          <Paper
+                            key={slot.start}
+                            withBorder
+                            p="sm"
+                            style={{
+                              cursor: publicBooked ? "default" : "pointer",
+                              backgroundColor: selectedSlot?.start === slot.start ? "var(--mantine-color-dark-1)" : undefined,
+                              opacity: publicBooked ? 0.5 : 1,
+                            }}
+                            onClick={() => { if (!publicBooked) onSlotSelect(slot); }}
+                          >
+                            <Group justify="space-between">
+                              <Text size="sm" fw={selectedSlot?.start === slot.start ? 700 : 400}>
+                                {formatTime(slot.start, guestTimezone)} — {formatTime(slot.end, guestTimezone)}
+                              </Text>
+                              <Badge variant="light" size="sm" color={selectedSlot?.start === slot.start ? "white" : "gray"}>
+                                {meeting.durationMinutes}m
+                              </Badge>
+                            </Group>
+                          </Paper>
+                        ))}
+                      </Stack>
+                    </ScrollArea>
+                  )}
+                </>
+              )}
+            </Stack>
+          </Card>
+
+          <Card withBorder p="md">
+            <Stack>
+              <Title order={3}>Your details</Title>
+              {publicBooked ? (
+                <Paper withBorder p="sm" bg="green.0">
+                  <Group gap="sm" wrap="nowrap">
+                    <ThemeIcon color="green" variant="light"><Check size={16} /></ThemeIcon>
+                    <Box>
+                      <Text size="sm" fw={600}>Booking confirmed</Text>
+                      <Text size="xs" c="dimmed">
+                        {formatLongDate(publicBooked.start)} · {formatTime(publicBooked.start, guestTimezone)}
+                      </Text>
+                    </Box>
+                  </Group>
+                </Paper>
+              ) : publicError ? (
+                <Paper withBorder p="sm" bg="red.0">
+                  <Text size="sm" c="red" fw={500}>{publicError}</Text>
+                </Paper>
+              ) : (
+                <>
+                  <TextInput label="Name" value={guest.name} onChange={(e) => onGuestChange({ ...guest, name: e.currentTarget.value })} />
+                  <TextInput label="Email" type="email" value={guest.email} onChange={(e) => onGuestChange({ ...guest, email: e.currentTarget.value })} />
+                  <Textarea label="Notes" minRows={3} value={guest.notes} onChange={(e) => onGuestChange({ ...guest, notes: e.currentTarget.value })} />
+                  <Button
+                    color="dark"
+                    leftSection={<CalendarDays size={16} />}
+                    loading={isSubmitting}
+                    disabled={!selectedSlot || !guest.name || !guest.email}
+                    onClick={onSubmit}
+                  >
+                    Confirm
+                  </Button>
+                </>
+              )}
+            </Stack>
+          </Card>
+        </SimpleGrid>
+      </Stack>
+    </Container>
+  );
+}

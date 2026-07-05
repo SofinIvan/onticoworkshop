@@ -1,5 +1,6 @@
 package com.onticoworkshop.controller;
 
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.http.HttpStatus;
@@ -30,12 +31,12 @@ public class BookingController {
 
   @GetMapping
   public ResponseEntity<Map<String, Object>> listBookings(
-      @RequestParam(required = false) String userId,
+      @RequestParam(required = false) String organizerId,
       @RequestParam(required = false) String status) {
-    if (userId == null || userId.isBlank()) {
-      return ResponseEntity.ok(Map.of("items", java.util.List.of()));
+    if (organizerId == null || organizerId.isBlank()) {
+      return ResponseEntity.ok(Map.of("items", List.of()));
     }
-    return ResponseEntity.ok(Map.of("items", bookingService.listBookings(userId, status)));
+    return ResponseEntity.ok(Map.of("items", bookingService.listBookings(organizerId, status)));
   }
 
   @GetMapping("/new")
@@ -47,11 +48,12 @@ public class BookingController {
   @GetMapping("/slots")
   public ResponseEntity<Map<String, Object>> listSlots(
       @RequestParam String username,
+      @RequestParam String meetingId,
       @RequestParam String startDate,
       @RequestParam String endDate,
       @RequestParam String timezone) {
     return ResponseEntity.ok(
-        Map.of("items", bookingService.listSlots(username, startDate, endDate, timezone)));
+        Map.of("items", bookingService.listSlots(username, meetingId, startDate, endDate, timezone)));
   }
 
   @PostMapping

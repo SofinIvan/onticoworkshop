@@ -22,7 +22,9 @@ public class Booking {
   @Id
   private String id;
 
-  private String userId;
+  private String organizerId;
+
+  private String meetingId;
 
   private String status;
 

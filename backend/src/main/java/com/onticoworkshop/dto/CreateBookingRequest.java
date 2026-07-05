@@ -14,6 +14,10 @@ public class CreateBookingRequest {
   @NotBlank
   private String username;
 
+  private String meetingId;
+
+  private String meetingUuid;
+
   @NotBlank
   private String guestName;
 
